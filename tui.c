@@ -106,17 +106,24 @@ static int tui_read_key(void) {
 	}
 }
 
-/* redraw the whole menu, keeping the selection visible (simple viewport) */
-static void tui_draw(char **names, int count, int sel, int *top, const char *msg) {
+static int tui_clear_for_lines(int lines) {
 	struct winsize ws;
-	int rows = 25, cols = 80;
+	int cols = 80, rows = 25;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
 		if (ws.ws_row) rows = ws.ws_row;
 		if (ws.ws_col) cols = ws.ws_col;
 	}
+	fputs("\033[2J\033[H", stdout);
+	for (int i = lines; i < rows; i++)
+		fputs("\033[0m \r\n", stdout);
+	return lines;
+}
 
-	int header = 2;                 /* title + help line */
-	int avail  = rows - header - 1; /* reserve a status line */
+/* redraw the whole menu, keeping the selection visible (simple viewport) */
+static void tui_draw(char **names, int count, int sel, int *top, const char *msg) {
+
+	int avail = tui_clear_for_lines(count + 3); /* items + title + help + status/empty line */
+
 	if (avail < 1)
 		avail = 1;
 
@@ -127,41 +134,28 @@ static void tui_draw(char **names, int count, int sel, int *top, const char *msg
 	if (*top < 0)
 		*top = 0;
 
-	fputs("\033[2J\033[H", stdout);
-	fputs("\033[1mabduco\033[0m \033[1m- interactive session selector\033[0m\r\n", stdout);
-	fputs("Arrows to move, d to kill, c to create, ENTER to attach, q to quit.\r\n", stdout);
+	fputs("\033[0mAbduco - ", stdout);
+	if (msg && *msg)
+		fprintf(stdout, "%s\r\n", msg);
+	else if (count == 0)
+		fprintf(stdout, "No active sessions.\r\n");
+	else
+		fprintf(stdout, "%d session(s):\r\n", count);
 
 	for (int i = 0; i < avail; i++) {
 		int idx = *top + i;
 		if (idx >= count)
 			break;
 		fputs(idx == sel ? "\033[7m" : "\033[0m", stdout);
-		fputs("  ", stdout);
+		fputs(idx == sel ? " > " : "   ", stdout);
 		const char *name = names[idx];
-		int len = strlen(name);
-		int max = cols - 2;
-		if (max < 0)
-			max = 0;
-		if (len <= max) {
-			fputs(name, stdout);
-			for (int p = len; p < max; p++)
-				putchar(' ');
-		} else {
-			fwrite(name, 1, max, stdout);
-		}
+		fputs(name, stdout);
+		fputs(" ", stdout);
 		fputs("\033[0m\r\n", stdout);
 	}
 
-	for (int i = count - *top; i < avail; i++)
-		fputs("\033[0m \r\n", stdout);
+	fputs("Arrows to move, d to kill, c to create, ENTER to attach, q to quit.\r\n", stdout);
 
-	fputs("\033[0m", stdout);
-	if (msg && *msg)
-		fprintf(stdout, "%s\r\n", msg);
-	else if (count == 0)
-		fprintf(stdout, "No active sessions.\r\n");
-	else
-		fprintf(stdout, "%d session(s), current: %d/%d\r\n", count, sel + 1, count);
 	fflush(stdout);
 }
 
@@ -221,13 +215,12 @@ static int tui_attach_session(const char *name) {
 	return attach_session(name, false);
 }
 
-
 /* Ask the user to confirm killing the selected session. Returns true if confirmed.*/
 static bool tui_confirm_kill(const char *name) {
-	fputs("\033[2J\033[H", stdout);
+	tui_clear_for_lines(2); /* prompt + empty.status line */
 	fputs("\033[1mKill session\033[0m '", stdout);
 	fputs(name, stdout);
-	fputs("' ? [y/N] ", stdout);
+	fputs("' ? [y/N]\r\n", stdout);
 	fflush(stdout);
 	int c = tui_read_byte(-1);
 	return c == 'y' || c == 'Y';
@@ -237,7 +230,7 @@ static bool tui_confirm_kill(const char *name) {
  * on Enter (which may be empty), or NULL if the user pressed ESC to cancel.
  * The terminal is in raw mode, so characters are echoed manually. */
 static char *tui_read_line(const char *prompt) {
-	fputs("\033[2J\033[H", stdout);
+	tui_clear_for_lines(2); /* prompt + empty.status line */
 	fputs("\033[1m", stdout);
 	fputs(prompt, stdout);
 	fputs("\033[0m", stdout);
@@ -348,6 +341,7 @@ out:
 	tui_draw(names, count, sel, top, msg);
 	tui_read_byte(800);
 }
+
 void tui_main(void) {
 	char **names = NULL;
 	int count = 0;
