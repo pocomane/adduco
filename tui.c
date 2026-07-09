@@ -17,6 +17,7 @@ enum {
 	KEY_QUIT,
 	KEY_KILL,
 	KEY_CREATE,
+	KEY_RENAME,
 };
 
 static struct termios orig_term;
@@ -83,6 +84,8 @@ static int tui_read_key(void) {
 		return KEY_KILL;
 	if (c == 'c' || c == 'C')
 		return KEY_CREATE;
+	if (c == 'm' || c == 'M')
+		return KEY_RENAME;
 	if (c == 'j' || c == 'J')
 		return KEY_DOWN;
 	if (c == 'k' || c == 'K')
@@ -154,7 +157,7 @@ static void tui_draw(char **names, int count, int sel, int *top, const char *msg
 		fputs("\033[0m\r\n", stdout);
 	}
 
-	fputs("Arrows to move, d to kill, c to create, ENTER to attach, q to quit.\r\n", stdout);
+	fputs("Arrows to move, d to kill, c to create, ENTER to attach, m to rename, q to quit.\r\n", stdout);
 
 	fflush(stdout);
 }
@@ -313,6 +316,35 @@ out:
 	tui_read_byte(800);
 }
 
+/* Prompt for a new name and rename the selected session. Pressing ESC at the
+ * prompt cancels and returns to the session list. If the new name is empty or
+ * already in use, an error message is shown. */
+static void tui_rename_session(char **names, int count, int sel, int *top) {
+	const char *msg;
+	char *name = names[sel];
+	char *newname = tui_read_line("New session name (ESC to cancel): ");
+	if (!newname) {
+		msg = "Rename cancelled.";
+		return;
+	}
+	if (newname[0] == '\0') {
+		free(newname);
+		msg = "Empty name, rename aborted.";
+		return;
+	}
+	if (session_exists(newname)) {
+		free(newname);
+		msg = "Session already exists.";
+		return;
+	}
+
+	if (rename_session(name, newname))
+		msg = "Session renamed.";
+	else
+		msg = "Could not rename session.";
+	free(newname);
+}
+
 void tui_main(void) {
 	char **names = NULL;
 	int count = 0;
@@ -378,6 +410,13 @@ void tui_main(void) {
 			}
 		} else if (k == KEY_CREATE) {
 			tui_create_session(names, count, sel, &top);
+
+		} else if (k == KEY_RENAME) {
+			if (count > 0 && sel < count) {
+				tui_rename_session(names, count, sel, &top);
+				sel = 0;
+				top = 0;
+			}
 		}
 	}
 
