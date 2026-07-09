@@ -159,49 +159,6 @@ static void tui_draw(char **names, int count, int sel, int *top, const char *msg
 	fflush(stdout);
 }
 
-/* Collect the names of all active sessions into *names (caller must free using
- * session_list_free). Returns the number of sessions or -1 on error. */
-static int session_list(char ***names) {
-	if (!create_socket_dir(&sockaddr))
-		return -1;
-	char cwd[PATH_MAX];
-	if (!getcwd(cwd, sizeof cwd))
-		return -1;
-	if (chdir(sockaddr.sun_path) == -1)
-		return -1;
-	struct dirent **namelist;
-	int n = scandir(sockaddr.sun_path, &namelist, session_filter, session_comparator);
-	if (n < 0) {
-		chdir(cwd);
-		return -1;
-	}
-	char **list = NULL;
-	int count = 0;
-	for (int i = 0; i < n; i++) {
-		struct stat sb;
-		if (stat(namelist[i]->d_name, &sb) == 0 && S_ISSOCK(sb.st_mode)) {
-			pid_t pid = 0;
-			char *local = strstr(namelist[i]->d_name, server.host);
-			if (local) {
-				*local = '\0'; /* truncate hostname if we are local */
-				if (!(pid = session_exists(namelist[i]->d_name)))
-					goto next;
-			}
-			char **tmp = realloc(list, (count + 1) * sizeof *tmp);
-			if (tmp) {
-				list = tmp;
-				list[count++] = strdup(namelist[i]->d_name);
-			}
-		}
-		next:
-		free(namelist[i]);
-	}
-	free(namelist);
-	chdir(cwd);
-	*names = list;
-	return count;
-}
-
 static void session_list_free(char **names, int count) {
 	if (!names)
 		return;
@@ -210,9 +167,23 @@ static void session_list_free(char **names, int count) {
 	free(names);
 }
 
-/* Attach to an existing session, returning once it is detached or terminated. */
-static int tui_attach_session(const char *name) {
-	return attach_session(name, false);
+/* Collect the names of all active sessions into *names Returns the number of
+ * sessions or -1 on error. */
+static void session_list(char ***names, int *count) {
+	if (*count > 0){
+		session_list_free(*names, *count);
+	}
+	*count = 0;
+	char **list = NULL;
+	struct session_iterator iter = {0};
+	while(iterate_over_sessions(&iter)){
+		char **tmp = realloc(list, (*count + 1) * sizeof *tmp);
+		if (tmp) {
+			list = tmp;
+			list[(*count)++] = strdup(iter.namelist[iter.current]->d_name);
+		}
+	}
+	*names = list;
 }
 
 /* Ask the user to confirm killing the selected session. Returns true if confirmed.*/
@@ -352,7 +323,7 @@ void tui_main(void) {
 	atexit(tui_restore_term);
 
 	for (;;) {
-		count = session_list(&names);
+		session_list(&names, &count);
 		if (count < 0)
 			count = 0;
 		if (sel >= count)
@@ -378,7 +349,7 @@ void tui_main(void) {
 				names = NULL;
 				count = 0;
 				tui_restore_term();
-				tui_attach_session(name);
+				attach_session(name, false);
 				free(name);
 				/* the attach call restored the terminal, re-enter raw mode
 				 * so we can show the menu again once it returns */

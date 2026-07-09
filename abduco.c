@@ -598,38 +598,65 @@ static int session_comparator(const struct dirent **a, const struct dirent **b) 
 	return sa.st_atime < sb.st_atime ? -1 : 1;
 }
 
-static int list_session(void) {
-	if (!create_socket_dir(&sockaddr))
-		return 1;
-	if (chdir(sockaddr.sun_path) == -1)
-		die("list-session");
+struct session_iterator {
 	struct dirent **namelist;
-	int n = scandir(sockaddr.sun_path, &namelist, session_filter, session_comparator);
-	if (n < 0)
-		return 1;
-	printf("Active sessions (on host %s)\n", server.host+1);
-	while (n--) {
-		struct stat sb; char buf[255];
-		if (stat(namelist[n]->d_name, &sb) == 0 && S_ISSOCK(sb.st_mode)) {
-			pid_t pid = 0;
-			strftime(buf, sizeof(buf), "%a%t %F %T", localtime(&sb.st_mtime));
-			char status = ' ';
-			char *local = strstr(namelist[n]->d_name, server.host);
+	int count;
+	int current;
+	pid_t pid;
+	struct stat sb;
+	char info;
+};
+
+/* continue to iterate over sessions, stop when it returns false */
+static int iterate_over_sessions(struct session_iterator *result) {
+	result->info = 'E'; /* iteration error */
+	if (!result->namelist) {
+		result->count = -1;
+		result->current = -1;
+		if (!create_socket_dir(&sockaddr))
+			return 0;
+		if (chdir(sockaddr.sun_path) == -1)
+			return 0;
+		result->count = scandir(sockaddr.sun_path, &result->namelist, session_filter, session_comparator);
+		if (result->count < 0)
+			return 0;
+	}
+	result->info = ' '; /* background session */
+	result->current += 1;
+	if (result->count > 0 && result->current < result->count) {
+		struct dirent *item = result->namelist[result->current];
+		if (stat(item->d_name, &result->sb) == 0 && S_ISSOCK(result->sb.st_mode)) {
+			char *local = strstr(item->d_name, server.host);
 			if (local) {
 				*local = '\0'; /* truncate hostname if we are local */
-				if (!(pid = session_exists(namelist[n]->d_name)))
-					continue;
+				if (!(result->pid = session_exists(item->d_name)))
+					return iterate_over_sessions(result); /* try next item */
+				if (result->sb.st_mode & S_IXUSR)
+					result->info = '*'; /* session with connected client */
+				else if (result->sb.st_mode & S_IXGRP)
+					result->info = '+'; /* dead session waiting for a client to collect the exit status */
 			}
-			if (sb.st_mode & S_IXUSR)
-				status = '*';
-			else if (sb.st_mode & S_IXGRP)
-				status = '+';
-			printf("%c %s\t%jd\t%s\n", status, buf, (intmax_t)pid, namelist[n]->d_name);
 		}
-		free(namelist[n]);
 	}
-	free(namelist);
-	return 0;
+	if (result->current >= result->count){
+		for (int n = 0; n < result->count; n += 1)
+			free(result->namelist[n]);
+		free(result->namelist);
+		result->namelist = NULL;
+		result->count = 0;
+	}
+	return result->namelist != NULL;
+}
+
+static int print_session_list(void) {
+	struct session_iterator iter = {0};
+	printf("Active sessions (on host %s)\n", server.host+1);
+  while(iterate_over_sessions(&iter)) { 
+		char buf[255];
+		strftime(buf, sizeof(buf), "%a%t %F %T", localtime(&iter.sb.st_mtime));
+		printf("%c %s\t%jd\t%s\n", iter.info, buf, (intmax_t)iter.pid, iter.namelist[iter.current]->d_name);
+  }
+  return iter.info == 'E'; /* E -> error while iterating */
 }
 
 #include "tui.c"
@@ -717,8 +744,11 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if (!action && server.session_name[0] == '\0')
-		exit(list_session());
+	if (!action && server.session_name[0] == '\0'){
+		if (print_session_list() != 0)
+			die("list-session");
+		exit(EXIT_SUCCESS);
+  }
 	if (!action || (action != 'i' && server.session_name[0] == '\0'))
 		usage();
 
