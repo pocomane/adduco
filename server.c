@@ -174,6 +174,27 @@ static void server_sigusr1_handler(int sig) {
 	}
 }
 
+static bool server_rename_session(const char *newname) {
+	char oldpath[sizeof(sockaddr.sun_path)];
+	strncpy(oldpath, sockaddr.sun_path, sizeof(oldpath) - 1);
+	oldpath[sizeof(oldpath) - 1] = (char)0;
+	
+	/* create the new communication socket at the new path */
+	int newfd = server_create_socket(newname);
+	if (newfd == -1)
+		return false;
+
+	if (server.socket > 0)
+		close(server.socket);
+	server.socket = newfd;
+	unlink(oldpath);
+
+	/* keep session name in sync for SIGUSR1 recreation */
+	strncpy(server.session_name, newname, sizeof(server.session_name));
+	server.session_name[sizeof(server.session_name)-1] = '\0';
+	return true;
+}
+
 static void server_atexit_handler(void) {
 	unlink(sockaddr.sun_path);
 }
@@ -244,6 +265,16 @@ static void server_mainloop(void) {
 				case MSG_DETACH:
 					c->state = STATE_DISCONNECTED;
 					break;
+				case MSG_RENAME: {
+					bool ok = server_rename_session((const char *)client_packet.u.msg);
+					Packet ack = {
+						.type = MSG_RENAME,
+						.len = sizeof(ack.u.i),
+						.u.i = ok ? 1 : 0,
+					};
+					server_send_packet(c, &ack);
+					break;
+				}
 				default: /* ignore package */
 					break;
 				}

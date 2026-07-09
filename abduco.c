@@ -69,6 +69,7 @@ enum PacketType {
 	MSG_RESIZE  = 3,
 	MSG_EXIT    = 4,
 	MSG_PID     = 5,
+	MSG_RENAME  = 6,
 };
 
 typedef struct {
@@ -113,7 +114,7 @@ typedef struct {
 	pid_t pid;
 	volatile sig_atomic_t running;
 	const char *name;
-	const char *session_name;
+	char session_name[255];
 	char host[255];
 	bool read_pty;
 } Server;
@@ -223,7 +224,7 @@ static void die(const char *s) {
 }
 
 static void usage(void) {
-	fprintf(stderr, "usage: abduco [-a|-A|-c|-n|-k] [-i] [-p] [-r] [-q] [-l] [-f] [-e detachkey] name command\n");
+	fprintf(stderr, "usage: abduco [-a|-A|-c|-n|-k] [-i] [-p] [-r] [-q] [-l] [-f] [-e detachkey] [-m newname] name command\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -252,6 +253,7 @@ static int session_connect(const char *name) {
 	if (connect(fd, (struct sockaddr*)&sockaddr, socklen) == -1) {
 		if (errno == ECONNREFUSED && stat(sockaddr.sun_path, &sb) == 0 && S_ISSOCK(sb.st_mode))
 			unlink(sockaddr.sun_path);
+		errno = 0;
 		close(fd);
 		return -1;
 	}
@@ -305,6 +307,7 @@ static bool create_socket_dir(struct sockaddr_un *sockaddr) {
 		umask(mask);
 		if (r != 0 && errno != EEXIST)
 			continue;
+		errno = 0;
 		if (lstat(sockaddr->sun_path, &sb) != 0)
 			continue;
 		if (!S_ISDIR(sb.st_mode)) {
@@ -545,6 +548,43 @@ static bool attach_session(const char *name, const bool terminate) {
 	return terminate;
 }
 
+static bool rename_session(const char *name, const char *newname) {
+	bool result = false;
+
+	/* connect to the running session */
+	if (server.socket > 0)
+		close(server.socket);
+	if ((server.socket = session_connect(name)) == -1)
+		return false;
+
+	Packet pkt;
+
+	/* wait the ack to not mess with packages */
+	if (!client_recv_packet(&pkt) || pkt.type != MSG_PID)
+		goto end;
+
+	/* ask the session server to rename the communication socket */
+	pkt.type = MSG_RENAME;
+	pkt.len = strlen(newname) + 1;
+	if (pkt.len >= sizeof(pkt.u.msg))
+		pkt.len = sizeof(pkt.u.msg) - 1;
+	strncpy(pkt.u.msg, newname, sizeof(pkt.u.msg) - 1);
+	pkt.u.msg[sizeof(pkt.u.msg) - 1] = (char)0;
+	if (!send_packet(server.socket, &pkt))
+		goto end;
+
+	/* wait for the server to acknowledge the rename */
+	pkt.type = MSG_PID;
+	if (!client_recv_packet(&pkt))
+		goto end;
+
+	result = pkt.type == MSG_RENAME && pkt.u.i == 1;
+
+end:
+	close(server.socket);
+	return result;
+}
+
 static int session_filter(const struct dirent *d) {
 	return strstr(d->d_name, server.host) != NULL;
 }
@@ -598,6 +638,7 @@ int main(int argc, char *argv[]) {
 	int opt;
 	bool force = false;
 	char **cmd = NULL, action = '\0';
+	const char *rename_target = NULL;
 
 	char *default_cmd[4] = { "/bin/sh", "-c", getenv("ABDUCO_CMD"), NULL };
 	if (!default_cmd[2]) {
@@ -608,7 +649,7 @@ int main(int argc, char *argv[]) {
 	server.name = basename(argv[0]);
 	gethostname(server.host+1, sizeof(server.host) - 1);
 
-	while ((opt = getopt(argc, argv, "aAcklne:fpqrvi")) != -1) {
+	while ((opt = getopt(argc, argv, "aAclne:fpqrvkim:")) != -1) {
 		switch (opt) {
 		case 'a':
 		case 'A':
@@ -618,6 +659,10 @@ int main(int argc, char *argv[]) {
 		case 'i':
 			action = opt;
 			break;
+		case 'm':
+			action = opt;
+			rename_target = optarg;
+      break;
 		case 'e':
 			if (!optarg)
 				usage();
@@ -649,8 +694,10 @@ int main(int argc, char *argv[]) {
 	}
 
 	/* collect the session name if trailing args */
-	if (optind < argc)
-		server.session_name = argv[optind];
+	if (optind < argc){
+		strncpy(server.session_name, argv[optind], sizeof(server.session_name));
+		server.session_name[sizeof(server.session_name)-1] = '\0';
+  }
 
 	/* if yet more trailing arguments, they must be the command */
 	if (optind + 1 < argc)
@@ -658,7 +705,7 @@ int main(int argc, char *argv[]) {
 	else
 		cmd = default_cmd;
 
-	if (server.session_name && !isatty(STDIN_FILENO) && action != 'i')
+	if (server.session_name[0] != '\0' && !isatty(STDIN_FILENO) && action != 'i')
 		passthrough = true;
 
 	if (passthrough) {
@@ -670,9 +717,9 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if (!action && !server.session_name)
+	if (!action && server.session_name[0] == '\0')
 		exit(list_session());
-	if (!action || (action != 'i' && !server.session_name))
+	if (!action || (action != 'i' && server.session_name[0] == '\0'))
 		usage();
 
 	if (!passthrough && tcgetattr(STDIN_FILENO, &orig_term) != -1) {
@@ -718,7 +765,7 @@ int main(int argc, char *argv[]) {
 			goto redo;
 		}
 		break;
-	case 'k': {
+	case 'k':
 		pid_t pid = session_exists(server.session_name);
 		if (!pid)
 			die("kill-session: session not found");
@@ -727,11 +774,16 @@ int main(int argc, char *argv[]) {
 		if (!quiet)
 			info("session killed");
 		break;
-	}
-	case 'i': {
+	case 'm':
+		if (!rename_session(server.session_name, rename_target)) {
+			die("can not rename session");
+		} else if (!quiet) {
+			info("session renamed to %s", rename_target);
+		}
+		break;
+	case 'i': 
 		tui_main();
     break;
-	}
 	}
 
 	return 0;
