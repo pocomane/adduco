@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
+#include <signal.h>
 
 enum {
 	KEY_NONE  = 0,
@@ -14,6 +15,7 @@ enum {
 	KEY_DOWN,
 	KEY_ENTER,
 	KEY_QUIT,
+	KEY_KILL,
 };
 
 static struct termios orig_term;
@@ -76,7 +78,8 @@ static int tui_read_key(void) {
 		return KEY_ENTER;
 	if (c == 'q' || c == 'Q')
 		return KEY_QUIT;
-	if (c == 'k')
+	if (c == 'k' || c == 'K')
+		return KEY_KILL;
 		return KEY_UP;
 	if (c == 'j')
 		return KEY_DOWN;
@@ -100,7 +103,7 @@ static int tui_read_key(void) {
 }
 
 /* redraw the whole menu, keeping the selection visible (simple viewport) */
-static void tui_draw(char **names, int count, int sel, int *top) {
+static void tui_draw(char **names, int count, int sel, int *top, const char *msg) {
 	struct winsize ws;
 	int rows = 25, cols = 80;
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
@@ -122,7 +125,7 @@ static void tui_draw(char **names, int count, int sel, int *top) {
 
 	fputs("\033[2J\033[H", stdout);
 	fputs("\033[1mabduco\033[0m \033[1m- interactive session selector\033[0m\r\n", stdout);
-	fputs("UP/DOWN or k/j to move, ENTER to attach, q to quit.\r\n", stdout);
+	fputs("Arrow keys or j to move, k to kill, ENTER to attach, q to quit.\r\n", stdout);
 
 	for (int i = 0; i < avail; i++) {
 		int idx = *top + i;
@@ -149,7 +152,9 @@ static void tui_draw(char **names, int count, int sel, int *top) {
 		fputs("\033[0m \r\n", stdout);
 
 	fputs("\033[0m", stdout);
-	if (count == 0)
+	if (msg && *msg)
+		fprintf(stdout, "%s\r\n", msg);
+	else if (count == 0)
 		fprintf(stdout, "No active sessions.\r\n");
 	else
 		fprintf(stdout, "%d session(s), current: %d/%d\r\n", count, sel + 1, count);
@@ -212,12 +217,24 @@ static int tui_attach_session(const char *name) {
 	return attach_session(name, false);
 }
 
+
+/* Ask the user to confirm killing the selected session. Returns true if confirmed.*/
+static bool tui_confirm_kill(const char *name) {
+	fputs("\033[2J\033[H", stdout);
+	fputs("\033[1mKill session\033[0m '", stdout);
+	fputs(name, stdout);
+	fputs("' ? [y/N] ", stdout);
+	fflush(stdout);
+	int c = tui_read_byte(-1);
+	return c == 'y' || c == 'Y';
+}
+
 void tui_main(void) {
 	char **names = NULL;
 	int count = 0;
 	int sel = 0;
 	int top = 0;
-
+printf(">>>>>>>>>>>>>\n");
 	tui_enter_raw();
 	atexit(tui_restore_term);
 
@@ -230,7 +247,7 @@ void tui_main(void) {
 		if (sel < 0)
 			sel = 0;
 
-		tui_draw(names, count, sel, &top);
+		tui_draw(names, count, sel, &top, NULL);
 
 		int k = tui_read_key();
 		if (k == KEY_QUIT) {
@@ -256,7 +273,26 @@ void tui_main(void) {
 				sel = 0;
 				top = 0;
 			}
-		}
+		} else if (k == KEY_KILL) {
+			if (count > 0 && sel < count) {
+				const char *name = names[sel];
+				if (tui_confirm_kill(name)) {
+					pid_t pid = session_exists(name);
+					if (!pid)
+						tui_draw(names, count, sel, &top, "Session not found.");
+					else if (kill(pid, SIGTERM) == -1)
+						tui_draw(names, count, sel, &top, "Could not kill session.");
+					else
+						tui_draw(names, count, sel, &top, "Session killed.");
+					tui_read_byte(800);
+				} else {
+					tui_draw(names, count, sel, &top, "Kill aborted.");
+					tui_read_byte(800);
+				}
+				sel = 0;
+				top = 0;
+			}
+    }
 	}
 
 	tui_restore_term();
