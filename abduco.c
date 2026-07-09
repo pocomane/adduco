@@ -672,7 +672,7 @@ int main(int argc, char *argv[]) {
 
 	if (!action && !server.session_name)
 		exit(list_session());
-	if (!action || !server.session_name)
+	if (!action || (action != 'i' && !server.session_name))
 		usage();
 
 	if (!passthrough && tcgetattr(STDIN_FILENO, &orig_term) != -1) {
