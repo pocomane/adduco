@@ -79,12 +79,14 @@ static int tui_read_key(void) {
 		return KEY_ENTER;
 	if (c == 'q' || c == 'Q')
 		return KEY_QUIT;
-	if (c == 'k' || c == 'K')
+	if (c == 'd' || c == 'D')
 		return KEY_KILL;
 	if (c == 'c' || c == 'C')
 		return KEY_CREATE;
 	if (c == 'j' || c == 'J')
 		return KEY_DOWN;
+	if (c == 'k' || c == 'K')
+		return KEY_UP;
 	if (c != 27)
 		return KEY_NONE;
 
@@ -127,7 +129,7 @@ static void tui_draw(char **names, int count, int sel, int *top, const char *msg
 
 	fputs("\033[2J\033[H", stdout);
 	fputs("\033[1mabduco\033[0m \033[1m- interactive session selector\033[0m\r\n", stdout);
-	fputs("Arrow keys or j to move, k to kill, c to create, ENTER to attach, q to quit.\r\n", stdout);
+	fputs("Arrows to move, d to kill, c to create, ENTER to attach, q to quit.\r\n", stdout);
 
 	for (int i = 0; i < avail; i++) {
 		int idx = *top + i;
