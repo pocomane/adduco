@@ -16,6 +16,7 @@ enum {
 	KEY_ENTER,
 	KEY_QUIT,
 	KEY_KILL,
+	KEY_CREATE,
 };
 
 static struct termios orig_term;
@@ -80,8 +81,9 @@ static int tui_read_key(void) {
 		return KEY_QUIT;
 	if (c == 'k' || c == 'K')
 		return KEY_KILL;
-		return KEY_UP;
-	if (c == 'j')
+	if (c == 'c' || c == 'C')
+		return KEY_CREATE;
+	if (c == 'j' || c == 'J')
 		return KEY_DOWN;
 	if (c != 27)
 		return KEY_NONE;
@@ -125,7 +127,7 @@ static void tui_draw(char **names, int count, int sel, int *top, const char *msg
 
 	fputs("\033[2J\033[H", stdout);
 	fputs("\033[1mabduco\033[0m \033[1m- interactive session selector\033[0m\r\n", stdout);
-	fputs("Arrow keys or j to move, k to kill, ENTER to attach, q to quit.\r\n", stdout);
+	fputs("Arrow keys or j to move, k to kill, c to create, ENTER to attach, q to quit.\r\n", stdout);
 
 	for (int i = 0; i < avail; i++) {
 		int idx = *top + i;
@@ -229,12 +231,127 @@ static bool tui_confirm_kill(const char *name) {
 	return c == 'y' || c == 'Y';
 }
 
+/* Read a line of text from the user. Returns a malloc'd, NUL-terminated string
+ * on Enter (which may be empty), or NULL if the user pressed ESC to cancel.
+ * The terminal is in raw mode, so characters are echoed manually. */
+static char *tui_read_line(const char *prompt) {
+	fputs("\033[2J\033[H", stdout);
+	fputs("\033[1m", stdout);
+	fputs(prompt, stdout);
+	fputs("\033[0m", stdout);
+	fflush(stdout);
+
+	size_t cap = 64, len = 0;
+	char *buf = malloc(cap);
+	if (!buf)
+		return NULL;
+	buf[0] = '\0';
+
+	int c;
+	for (;;) {
+		c = tui_read_byte(-1);
+		if (c < 0)
+			break;                 /* EOF / error -> cancel */
+		if (c == 27) {             /* ESC: cancel, drain any escape sequence */
+			for (;;) {
+				int d = tui_read_byte(0);
+				if (d < 0)
+					break;
+			}
+			break;
+		}
+		if (c == '\n' || c == '\r')
+			break;                /* finish the line */
+		if (c == 127 || c == '\b' || c == 8) {  /* backspace / delete */
+			if (len > 0) {
+				len--;
+				buf[len] = '\0';
+				fputs("\b \b", stdout);
+				fflush(stdout);
+			}
+			continue;
+		}
+		if (c < 32)                /* ignore other control characters */
+			continue;
+		if (len + 1 >= cap) {
+			size_t ncap = cap * 2;
+			char *tmp = realloc(buf, ncap);
+			if (!tmp)
+				break;
+			buf = tmp;
+			cap = ncap;
+		}
+		buf[len++] = (char)c;
+		buf[len] = '\0';
+		putchar(c);
+		fflush(stdout);
+	}
+
+	if (c == 27 || c < 0) {        /* cancelled */
+		free(buf);
+		return NULL;
+	}
+	return buf;
+}
+
+/* Prompt the user for a command to run and a session name, then create a new
+ * session. Pressing ESC at any prompt cancels and returns to the session list.
+ * If a session with the given name already exists, an error is shown. */
+static void tui_create_session(char **names, int count, int sel, int *top) {
+	const char *msg;
+	char *argv[4];
+	char *cmd = tui_read_line("Command to run (ESC to cancel): ");
+	if (!cmd) {
+		msg = "Create cancelled.";
+		goto out;
+	}
+	if (cmd[0] == '\0') {
+		free(cmd);
+		msg = "Empty command, create aborted.";
+		goto out;
+	}
+
+	char *name = tui_read_line("Session name (ESC to cancel): ");
+	if (!name) {
+		free(cmd);
+		msg = "Create cancelled.";
+		goto out;
+	}
+	if (name[0] == '\0') {
+		free(cmd);
+		free(name);
+		msg = "Empty name, create aborted.";
+		goto out;
+	}
+
+	if (session_exists(name)) {
+		free(cmd);
+		free(name);
+		msg = "Session already exists.";
+		goto out;
+	}
+
+	argv[0] = "/bin/sh";
+	argv[1] = "-c";
+	argv[2] = cmd;
+	argv[3] = NULL;
+	if (create_session(name, argv))
+		msg = "Session created.";
+	else
+		msg = "Could not create session.";
+	free(cmd);
+	free(name);
+
+out:
+	tui_draw(names, count, sel, top, msg);
+	tui_read_byte(800);
+}
 void tui_main(void) {
 	char **names = NULL;
 	int count = 0;
 	int sel = 0;
 	int top = 0;
-printf(">>>>>>>>>>>>>\n");
+
 	tui_enter_raw();
 	atexit(tui_restore_term);
 
@@ -292,7 +409,9 @@ printf(">>>>>>>>>>>>>\n");
 				sel = 0;
 				top = 0;
 			}
-    }
+		} else if (k == KEY_CREATE) {
+			tui_create_session(names, count, sel, &top);
+		}
 	}
 
 	tui_restore_term();
