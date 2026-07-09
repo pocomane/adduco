@@ -223,7 +223,7 @@ static void die(const char *s) {
 }
 
 static void usage(void) {
-	fprintf(stderr, "usage: abduco [-a|-A|-c|-n] [-p] [-r] [-q] [-l] [-f] [-e detachkey] name command\n");
+	fprintf(stderr, "usage: abduco [-a|-A|-c|-n|-k] [-p] [-r] [-q] [-l] [-f] [-e detachkey] name command\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -606,12 +606,13 @@ int main(int argc, char *argv[]) {
 	server.name = basename(argv[0]);
 	gethostname(server.host+1, sizeof(server.host) - 1);
 
-	while ((opt = getopt(argc, argv, "aAclne:fpqrv")) != -1) {
+	while ((opt = getopt(argc, argv, "aAcklne:fpqrv")) != -1) {
 		switch (opt) {
 		case 'a':
 		case 'A':
 		case 'c':
 		case 'n':
+		case 'k':
 			action = opt;
 			break;
 		case 'e':
@@ -712,6 +713,16 @@ int main(int argc, char *argv[]) {
 			goto redo;
 		}
 		break;
+	case 'k': {
+		pid_t pid = session_exists(server.session_name);
+		if (!pid)
+			die("kill-session: session not found");
+		if (kill(pid, SIGTERM) == -1)
+			die("kill-session: kill");
+		if (!quiet)
+			info("session killed");
+		break;
+	}
 	}
 
 	return 0;
