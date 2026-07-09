@@ -223,7 +223,7 @@ static void die(const char *s) {
 }
 
 static void usage(void) {
-	fprintf(stderr, "usage: abduco [-a|-A|-c|-n|-k] [-p] [-r] [-q] [-l] [-f] [-e detachkey] name command\n");
+	fprintf(stderr, "usage: abduco [-a|-A|-c|-n|-k] [-i] [-p] [-r] [-q] [-l] [-f] [-e detachkey] name command\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -592,6 +592,8 @@ static int list_session(void) {
 	return 0;
 }
 
+#include "tui.c"
+
 int main(int argc, char *argv[]) {
 	int opt;
 	bool force = false;
@@ -606,13 +608,14 @@ int main(int argc, char *argv[]) {
 	server.name = basename(argv[0]);
 	gethostname(server.host+1, sizeof(server.host) - 1);
 
-	while ((opt = getopt(argc, argv, "aAcklne:fpqrv")) != -1) {
+	while ((opt = getopt(argc, argv, "aAcklne:fpqrvi")) != -1) {
 		switch (opt) {
 		case 'a':
 		case 'A':
 		case 'c':
 		case 'n':
 		case 'k':
+		case 'i':
 			action = opt;
 			break;
 		case 'e':
@@ -655,14 +658,16 @@ int main(int argc, char *argv[]) {
 	else
 		cmd = default_cmd;
 
-	if (server.session_name && !isatty(STDIN_FILENO))
+	if (server.session_name && !isatty(STDIN_FILENO) && action != 'i')
 		passthrough = true;
 
 	if (passthrough) {
 		if (!action)
 			action = 'a';
-		quiet = true;
-		client.flags |= CLIENT_LOWPRIORITY;
+		if (action != 'i'){
+			quiet = true;
+			client.flags |= CLIENT_LOWPRIORITY;
+		}
 	}
 
 	if (!action && !server.session_name)
@@ -722,6 +727,10 @@ int main(int argc, char *argv[]) {
 		if (!quiet)
 			info("session killed");
 		break;
+	}
+	case 'i': {
+		tui_main();
+    break;
 	}
 	}
 
