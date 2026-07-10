@@ -59,6 +59,10 @@
 // --------------------------------------------------------------------------------
 // Configuration
 
+#ifndef VERSION
+#define VERSION "v0.develop"
+#endif
+
 /* default command to execute if non is given and $ABDUCO_CMD is unset */
 #define ABDUCO_CMD "dvtm"
 /* default detach key, can be overriden at run time using -e option */
@@ -789,7 +793,7 @@ static void die(const char *s) {
 static void usage(void) {
 	fprintf(stderr, 
 		"\n"
-		"Abduco version "VERSION" \n"
+		"Abduco - Version "VERSION" \n"
 		"- Written by Marc André Tanner <mat at brain-dump.org>.\n"
 		"- Small improvements by Mimmo Mane <github.com/pocomane>\n"
 		"\n"
