@@ -317,38 +317,45 @@ out:
 }
 
 /* Prompt for a new name and rename the selected session. Pressing ESC at the
- * prompt cancels and returns to the session list. If the new name is empty or
- * already in use, an error message is shown. */
-static void tui_rename_session(char **names, int count, int sel, int *top) {
-	const char *msg;
+ * prompt cancels and returns to the session list (NULL). On success the
+ * malloc'd new session name is returned and its ownership transferred to the
+ * caller, so the selection can be kept on the renamed session. If the new name
+ * is empty or already in use, NULL is returned. */
+static char *tui_rename_session(char **names, int count, int sel, int *top) {
 	char *name = names[sel];
 	char *newname = tui_read_line("New session name (ESC to cancel): ");
-	if (!newname) {
-		msg = "Rename cancelled.";
-		return;
-	}
+	if (!newname)
+		return NULL;
 	if (newname[0] == '\0') {
 		free(newname);
-		msg = "Empty name, rename aborted.";
-		return;
+		return NULL;
 	}
 	if (session_exists(newname)) {
 		free(newname);
-		msg = "Session already exists.";
-		return;
+		return NULL;
 	}
-
 	if (rename_session(name, newname))
-		msg = "Session renamed.";
-	else
-		msg = "Could not rename session.";
+		return newname;   /* ownership transferred to caller */
 	free(newname);
+	return NULL;
+}
+
+/* Resolve the index of the session named 'sel' within 'names', or return -1
+ * if no session with that name is currently present. */
+static int tui_find_index(char **names, int count, const char *sel) {
+	if (!sel)
+		return -1;
+	for (int i = 0; i < count; i++)
+		if (strcmp(names[i], sel) == 0)
+			return i;
+	return -1;
 }
 
 void tui_main(void) {
 	char **names = NULL;
 	int count = 0;
-	int sel = 0;
+	char *sel_name = NULL;   /* canonical selection: name of the chosen session */
+	int sel;                 /* derived index into names[], resolved each refresh */
 	int top = 0;
 
 	tui_enter_raw();
@@ -358,10 +365,16 @@ void tui_main(void) {
 		session_list(&names, &count);
 		if (count < 0)
 			count = 0;
-		if (sel >= count)
-			sel = count > 0 ? count - 1 : 0;
-		if (sel < 0)
+
+		/* Resolve the selection by name. If the previously selected
+		 * session is gone (or none was selected yet), fall back to the
+		 * first session of the freshly built list. */
+		sel = tui_find_index(names, count, sel_name);
+		if (sel < 0) {
 			sel = 0;
+			free(sel_name);
+			sel_name = count > 0 ? strdup(names[0]) : NULL;
+		}
 
 		tui_draw(names, count, sel, &top, NULL);
 
@@ -369,25 +382,31 @@ void tui_main(void) {
 		if (k == KEY_QUIT) {
 			break;
 		} else if (k == KEY_UP) {
-			if (sel > 0)
+			if (sel > 0) {
 				sel--;
+				free(sel_name);
+				sel_name = strdup(names[sel]);
+			}
 		} else if (k == KEY_DOWN) {
-			if (sel < count - 1)
+			if (sel < count - 1) {
 				sel++;
+				free(sel_name);
+				sel_name = strdup(names[sel]);
+			}
 		} else if (k == KEY_ENTER) {
 			if (count > 0 && sel < count) {
 				char *name = strdup(names[sel]);
 				session_list_free(names, count);
 				names = NULL;
 				count = 0;
+				/* keep sel_name so the very same session is
+				 * re-selected once we return (if it still exists) */
 				tui_restore_term();
 				attach_session(name, false);
 				free(name);
-				/* the attach call restored the terminal, re-enter raw mode
-				 * so we can show the menu again once it returns */
+				/* the attach call restored the terminal, re-enter
+				 * raw mode to show the menu again */
 				tui_enter_raw();
-				sel = 0;
-				top = 0;
 			}
 		} else if (k == KEY_KILL) {
 			if (count > 0 && sel < count) {
@@ -405,22 +424,24 @@ void tui_main(void) {
 					tui_draw(names, count, sel, &top, "Kill aborted.");
 					tui_read_byte(800);
 				}
-				sel = 0;
-				top = 0;
+				/* keep sel_name: it will not be found after the
+				 * refresh, so the first session gets selected */
 			}
 		} else if (k == KEY_CREATE) {
 			tui_create_session(names, count, sel, &top);
-
 		} else if (k == KEY_RENAME) {
 			if (count > 0 && sel < count) {
-				tui_rename_session(names, count, sel, &top);
-				sel = 0;
-				top = 0;
+				char *newname = tui_rename_session(names, count, sel, &top);
+				if (newname) {
+					free(sel_name);
+					sel_name = newname;   /* stay on the renamed session */
+				}
 			}
 		}
 	}
 
 	tui_restore_term();
 	session_list_free(names, count);
+	free(sel_name);
 }
 
