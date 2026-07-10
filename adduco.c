@@ -1321,6 +1321,7 @@ enum {
 	KEY_KILL,
 	KEY_CREATE,
 	KEY_RENAME,
+	KEY_ATTACH_RO,
 };
 
 static struct termios orig_term;
@@ -1389,6 +1390,8 @@ static int tui_read_key(void) {
 		return KEY_CREATE;
 	if (c == 'm' || c == 'M')
 		return KEY_RENAME;
+	if (c == 'r' || c == 'R')
+		return KEY_ATTACH_RO;
 	if (c == 'j' || c == 'J')
 		return KEY_DOWN;
 	if (c == 'k' || c == 'K')
@@ -1460,7 +1463,7 @@ static void tui_draw(char **names, int count, int sel, int *top, const char *msg
 		fputs("\033[0m\r\n", stdout);
 	}
 
-	fputs("Arrows to move, d to kill, c to create, ENTER to attach, m to rename, q to quit.\r\n", stdout);
+	fputs("Arrows to move, d to kill, c to create, ENTER to attach, m to rename, r to attach read-only, q to quit.\r\n", stdout);
 
 	fflush(stdout);
 }
@@ -1706,6 +1709,23 @@ void tui_main(void) {
 				 * re-selected once we return (if it still exists) */
 				tui_restore_term();
 				attach_session(name, false);
+				free(name);
+				/* the attach call restored the terminal, re-enter
+				 * raw mode to show the menu again */
+				tui_enter_raw();
+			}
+		} else if (k == KEY_ATTACH_RO) {
+			if (count > 0 && sel < count) {
+				char *name = strdup(names[sel]);
+				session_list_free(names, count);
+				names = NULL;
+				count = 0;
+				/* keep sel_name so the very same session is
+				 * re-selected once we return (if it still exists) */
+				tui_restore_term();
+				client.flags |= CLIENT_READONLY;
+				attach_session(name, false);
+				client.flags &= ~CLIENT_READONLY;
 				free(name);
 				/* the attach call restored the terminal, re-enter
 				 * raw mode to show the menu again */
