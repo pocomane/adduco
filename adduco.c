@@ -1392,41 +1392,40 @@ static int tui_read_byte(int timeout_ms) {
 
 /* read and decode the next key press */
 static int tui_read_key(void) {
+
 	int c = tui_read_byte(-1);
 	if (c < 0)
 		return KEY_QUIT;
-	if (c == '\n' || c == '\r')
-		return KEY_ENTER;
-	if (c == 'q' || c == 'Q')
-		return KEY_QUIT;
-	if (c == 'd' || c == 'D')
-		return KEY_KILL;
-	if (c == 'c' || c == 'C')
-		return KEY_CREATE;
-	if (c == 'm' || c == 'M')
-		return KEY_RENAME;
-	if (c == 'r' || c == 'R')
-		return KEY_ATTACH_RO;
-	if (c == 'j' || c == 'J')
-		return KEY_DOWN;
-	if (c == 'k' || c == 'K')
-		return KEY_UP;
-	if (c != 27)
-		return KEY_NONE;
 
-	/* an escape sequence (e.g. arrow keys) starts with ESC [ <letter> */
-	int b = tui_read_byte(50);
-	if (b < 0)
-		return KEY_QUIT;   /* lone ESC -> quit */
-	if (b != '[')
-		return KEY_NONE;
-	b = tui_read_byte(50);
-	if (b < 0)
-		return KEY_NONE;
-	switch (b) {
-	case 'A': return KEY_UP;
-	case 'B': return KEY_DOWN;
-	default:  return KEY_NONE;
+	switch (c) {
+	default: return KEY_NONE;
+	case '\n': return KEY_ENTER;
+	case '\r': return KEY_ENTER;
+	case 'q': return KEY_QUIT;
+	case 'd': return KEY_KILL;
+	case 'c': return KEY_CREATE;
+	case 'm': return KEY_RENAME;
+	case 'r': return KEY_ATTACH_RO;
+	case 'j': return KEY_DOWN;
+	case 'k': return KEY_UP;
+	case 27:
+
+		/* an escape sequence (e.g. arrow keys) starts with ESC [ <letter> */
+		c = tui_read_byte(50);
+		if (c < 0)
+			return KEY_QUIT;   /* lone ESC -> quit */
+		if (c != '[')
+			return KEY_NONE;
+
+		c = tui_read_byte(50);
+		if (c < 0)
+			return KEY_NONE;
+
+		switch (c) {
+		default: return KEY_NONE;
+		case 'A': return KEY_UP;
+		case 'B': return KEY_DOWN;
+		}
 	}
 }
 
