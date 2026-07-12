@@ -936,8 +936,11 @@ static bool session_alive(const char *name) {
 	       S_ISSOCK(sb.st_mode) && (sb.st_mode & S_IXGRP) == 0;
 }
 
-static bool create_socket_dir(struct sockaddr_un *sockaddr) {
-	sockaddr->sun_path[0] = '\0';
+static bool create_socket_dir(char *path, int path_max_len) {
+	struct sockaddr_un s = {
+	.sun_family = AF_UNIX,
+	};
+	struct sockaddr_un *sockaddr = &s;
 	int socketfd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (socketfd == -1)
 		return false;
@@ -1005,6 +1008,10 @@ static bool create_socket_dir(struct sockaddr_un *sockaddr) {
 		unlink(sockaddr->sun_path);
 		close(socketfd);
 		sockaddr->sun_path[dirlen] = '\0';
+
+		if (!xsnprintf(path, path_max_len, "%s", sockaddr->sun_path))
+			continue;
+		
 		return true;
 	}
 
@@ -1030,7 +1037,7 @@ static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 		if (!xsnprintf(sockaddr->sun_path, maxlen, "%s/%s", cwd, name))
 			return false;
 	} else {
-		if (!create_socket_dir(sockaddr))
+		if (!create_socket_dir(sockaddr->sun_path, sizeof(sockaddr->sun_path)))
 			return false;
 		if (strlen(sockaddr->sun_path) + strlen(name) + strlen(server.host) >= maxlen) {
 			errno = ENAMETOOLONG;
@@ -1271,7 +1278,7 @@ static int iterate_over_sessions(struct session_iterator *result) {
 	if (!result->namelist) {
 		result->count = -1;
 		result->current = -1;
-		if (!create_socket_dir(&sockaddr))
+		if (!create_socket_dir(sockaddr.sun_path, sizeof(sockaddr.sun_path)))
 			return 0;
 		if (chdir(sockaddr.sun_path) == -1)
 			return 0;
@@ -1309,7 +1316,7 @@ static int iterate_over_sessions(struct session_iterator *result) {
 static int print_session_list(void) {
 	struct session_iterator iter = {0};
 	printf("Active sessions (on host %s)\n", server.host+1);
-  while(iterate_over_sessions(&iter)) { 
+  while(iterate_over_sessions(&iter)) {
 		char buf[255];
 		strftime(buf, sizeof(buf), "%a%t %F %T", localtime(&iter.sb.st_mtime));
 		printf("%c %s\t%jd\t%s\n", iter.info, buf, (intmax_t)iter.pid, iter.namelist[iter.current]->d_name);
@@ -1451,27 +1458,31 @@ static void tui_draw(char **names, int count, int sel, int *top, const char *msg
 	if (*top < 0)
 		*top = 0;
 
-	fputs("\033[0mAbduco - ", stdout);
-	if (msg && *msg)
-		fprintf(stdout, "%s\r\n", msg);
-	else if (count == 0)
-		fprintf(stdout, "No active sessions.\r\n");
-	else
+	char path[256] = {0};
+	create_socket_dir(path, sizeof(path));
+	fprintf(stdout, "\033[0mSession store: %s - ", path);
+	if (count == 0)
+		fprintf(stdout, "No active sessions.\r\n - ---\r\n");
+	else {
 		fprintf(stdout, "%d session(s):\r\n", count);
 
-	for (int i = 0; i < avail; i++) {
-		int idx = *top + i;
-		if (idx >= count)
-			break;
-		fputs(idx == sel ? "\033[7m" : "\033[0m", stdout);
-		fputs(idx == sel ? " > " : "   ", stdout);
-		const char *name = names[idx];
-		fputs(name, stdout);
-		fputs(" ", stdout);
-		fputs("\033[0m\r\n", stdout);
+		for (int i = 0; i < avail; i++) {
+			int idx = *top + i;
+			if (idx >= count)
+				break;
+			fputs(idx == sel ? "\033[7m" : "\033[0m", stdout);
+			fputs(idx == sel ? " > " : "   ", stdout);
+			const char *name = names[idx];
+			fputs(name, stdout);
+			fputs(" ", stdout);
+			fputs("\033[0m\r\n", stdout);
+		}
 	}
 
 	fputs("Arrows to move, d to kill, c to create, ENTER to attach, m to rename, r to attach read-only, q to quit.\r\n", stdout);
+
+	if (msg && *msg)
+		fprintf(stdout, "Info: %s", msg);
 
 	fflush(stdout);
 }
@@ -1852,14 +1863,14 @@ int main(int argc, char *argv[]) {
 		passthrough = true;
 
 	if (passthrough && action == 'i')
-		wrong_usage()
+		wrong_usage();
 
 	if (passthrough) {
 			quiet = true;
 			client.flags |= CLIENT_LOWPRIORITY;
 	}
 
-	if (action != "i" && action != 's' && action != 'h' && server.session_name[0] == '\0')
+	if (action != 'i' && action != 's' && action != 'h' && server.session_name[0] == '\0')
 		wrong_usage();
 
 	if (!passthrough && tcgetattr(STDIN_FILENO, &orig_term) != -1) {
