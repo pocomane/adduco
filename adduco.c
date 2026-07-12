@@ -790,8 +790,8 @@ static void die(const char *s) {
 	exit(EXIT_FAILURE);
 }
 
-static void usage(void) {
-	fprintf(stderr, 
+static void print_help(void) {
+	fprintf(stdout, "%s",
 		"\n"
 		"Abduco - Version "VERSION" \n"
 		"- Written by Marc André Tanner <mat at brain-dump.org>.\n"
@@ -805,33 +805,37 @@ static void usage(void) {
 		"\n"
 		"Synopsis:\n"
 		"~~~\n"
-		"adduco -a [options] name\n"
-		"adduco -A [options] name [command [args ...]]\n"
-		"adduco -c [options] name [command [args ...]]\n"
-		"adduco -n [options] name [command [args ...]]\n"
+		"adduco\n"
+		"adduco [-s|-h]\n"
+		"adduco -k name\n"
+		"adduco -m newname name]\n"
+		"adduco [-a|-k] [options] name\n"
+		"adduco [-A|-c|-n] [options] name [command [args ...]]\n"
 		"~~~\n"
 		"\n"
-		"If no arguments are provided, `abduco` lists all active sessions sorted by creation date:\n"
-		"- '*' indicates at least one client is connected.\n"
-		"- '+' indicates the command terminated while no client was connected; attaching will show its exit status.\n"
+		"If no arguments are provided, `abduco` starts in interactive mode.\n"
 		"\n"
 		"Available actions:\n"
+		"- `-s` Lists all active sessions.\n"
 		"- `-a` Attach to an existing session.\n"
 		"- `-A` Attach to an existing session; if it doesn't exist, create and attach.\n"
 		"- `-c` Create a new session and attach immediately.\n"
 		"- `-n` Create a new session but do not attach.\n"
-		"- `-i` Starts a terminal UI for interactive usage.\n"
 		"- `-k` Kill an existing session.\n"
+		"- `-m newname` Rename an existing session.\n"
+		"- `-h` Print this help.\n"
+		"\n"
+		"The list of the active session is sorted by creation date, moreover:\n"
+		"- '*' indicates at least one client is connected.\n"
+		"- '+' indicates the command terminated while no client was connected; attaching will show its exit status.\n"
 		"\n"
 		"Options:\n"
-		"- `-m newname` Rename an existing session.\n"
 		"- `-e detachkey` Set detach key (default: Ctrl+\\). |\n"
 		"- `-f` Force session creation even if a terminated session with the same name exists. |\n"
 		"- `-l` Attach with lowest priority for terminal size control. |\n"
 		"- `-p` Pass stdin content to session (implies -q and -l). |\n"
 		"- `-q` Quiet mode; suppress informative messages. |\n"
 		"- `-r` Read-only mode; ignore user input. |\n"
-		"- `-v` Print version and exit. |\n"
 		"\n"
 		"Signals:\n"
 		"- `SIGWINCH` Sent to supervised process when primary client resizes terminal.\n"
@@ -875,6 +879,10 @@ static void usage(void) {
 		"~~~\n"
 		"\n"
 	);
+}
+
+static void wrong_usage(void) {
+	fprintf(stderr, "%s", "Wrong argument, call with the -h flag for help.\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -1478,7 +1486,7 @@ static void session_list_free(char **names, int count) {
 
 /* Collect the names of all active sessions into *names Returns the number of
  * sessions or -1 on error. */
-static void session_list(char ***names, int *count) {
+static void tui_session_list(char ***names, int *count) {
 	if (*count > 0){
 		session_list_free(*names, *count);
 	}
@@ -1668,7 +1676,7 @@ void tui_main(void) {
 	atexit(tui_restore_term);
 
 	for (;;) {
-		session_list(&names, &count);
+		tui_session_list(&names, &count);
 		if (count < 0)
 			count = 0;
 
@@ -1774,7 +1782,7 @@ void tui_main(void) {
 int main(int argc, char *argv[]) {
 	int opt;
 	bool force = false;
-	char **cmd = NULL, action = '\0';
+	char **cmd = NULL, action = 'i'; /* interactive mode by default */
 	const char *rename_target = NULL;
 
 	char *default_cmd[4] = { "/bin/sh", "-c", getenv("ABDUCO_CMD"), NULL };
@@ -1786,14 +1794,15 @@ int main(int argc, char *argv[]) {
 	server.name = basename(argv[0]);
 	gethostname(server.host+1, sizeof(server.host) - 1);
 
-	while ((opt = getopt(argc, argv, "aAclne:fpqrvkim:")) != -1) {
+	while ((opt = getopt(argc, argv, "aAclne:fpqrkm:hs")) != -1) {
 		switch (opt) {
 		case 'a':
 		case 'A':
 		case 'c':
 		case 'n':
 		case 'k':
-		case 'i':
+		case 'h':
+		case 's':
 			action = opt;
 			break;
 		case 'm':
@@ -1802,7 +1811,7 @@ int main(int argc, char *argv[]) {
       break;
 		case 'e':
 			if (!optarg)
-				usage();
+				wrong_usage();
 			if (optarg[0] == '^' && optarg[1])
 				optarg[0] = CTRL(optarg[1]);
 			KEY_DETACH = optarg[0];
@@ -1822,11 +1831,8 @@ int main(int argc, char *argv[]) {
 		case 'l':
 			client.flags |= CLIENT_LOWPRIORITY;
 			break;
-		case 'v':
-			puts("abduco-"VERSION" © 2013-2018 Marc André Tanner");
-			exit(EXIT_SUCCESS);
 		default:
-			usage();
+			wrong_usage();
 		}
 	}
 
@@ -1845,22 +1851,16 @@ int main(int argc, char *argv[]) {
 	if (server.session_name[0] != '\0' && !isatty(STDIN_FILENO) && action != 'i')
 		passthrough = true;
 
+	if (passthrough && action == 'i')
+		wrong_usage()
+
 	if (passthrough) {
-		if (!action)
-			action = 'a';
-		if (action != 'i'){
 			quiet = true;
 			client.flags |= CLIENT_LOWPRIORITY;
-		}
 	}
 
-	if (!action && server.session_name[0] == '\0'){
-		if (print_session_list() != 0)
-			die("list-session");
-		exit(EXIT_SUCCESS);
-  }
-	if (!action || (action != 'i' && server.session_name[0] == '\0'))
-		usage();
+	if (action != "i" && action != 's' && action != 'h' && server.session_name[0] == '\0')
+		wrong_usage();
 
 	if (!passthrough && tcgetattr(STDIN_FILENO, &orig_term) != -1) {
 		server.term = orig_term;
@@ -1921,9 +1921,16 @@ int main(int argc, char *argv[]) {
 			info("session renamed to %s", rename_target);
 		}
 		break;
-	case 'i': 
+	case 'i':
 		tui_main();
-    break;
+		break;
+	case 'h':
+		print_help();
+		break;
+	case 's':
+		if (print_session_list() != 0)
+			die("list-session");
+		break;
 	}
 
 	return 0;
