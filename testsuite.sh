@@ -1,11 +1,13 @@
 #!/bin/sh
 
-ABDUCO="./abduco"
+APPPATH="./build/adduco"
 # set detach key explicitly in case it was changed in config.h
 ABDUCO_OPTS="-e ^\\"
 
-[ ! -z "$1" ] && ABDUCO="$1"
-[ ! -x "$ABDUCO" ] && echo "usage: $0 /path/to/abduco" && exit 1
+[ ! -z "$1" ] && APPPATH="$1"
+[ ! -x "$APPPATH" ] && echo "usage: $0 /path/to/app" && exit 1
+
+APPNAME="$(basename "$APPPATH")"
 
 TESTS_OK=0
 TESTS_RUN=0
@@ -39,7 +41,7 @@ expected_abduco_prolog() {
 
 # $1 => session-name, $2 => exit status
 expected_abduco_epilog() {
-	echo "[?25h[?1049labduco: $1: session terminated with exit status $2"
+	echo "[?25h[?1049l$APPNAME: $1: session terminated with exit status $2"
 }
 
 # $1 => session-name, $2 => cmd to run
@@ -57,14 +59,14 @@ expected_abduco_detached_output() {
 }
 
 check_environment() {
-	[ "`$ABDUCO | wc -l`" -gt 1 ] && echo Abduco session exists && exit 1;
-	pgrep abduco && echo Abduco process exists && exit 1;
+	[ "`$APPPATH -s | wc -l`" -gt 1 ] && echo "$APPNAME" session exists && exit 1;
+	pgrep "$APPNAME" && echo $APPNAME process exists && exit 1;
 	return 0;
 }
 
 test_non_existing_command() {
 	check_environment || return 1;
-	$ABDUCO -c test ./non-existing-command >/dev/null 2>&1
+	$APPPATH -c test ./non-existing-command >/dev/null 2>&1
 	check_environment || return 1;
 }
 
@@ -81,7 +83,7 @@ run_test_attached() {
 	echo -n "Running test attached: $name "
 	expected_abduco_attached_output "$name" "$cmd" > "$output_expected" 2>&1
 
-	if $ABDUCO -c "$name" $cmd 2>&1 | sed 's/.$//' > "$output" && sleep 1 &&
+	if $APPPATH -c "$name" $cmd 2>&1 | sed 's/.$//' > "$output" && sleep 1 &&
 	   diff -u "$output_expected" "$output" && check_environment; then
 		rm "$output" "$output_expected"
 		TESTS_OK=$((TESTS_OK + 1))
@@ -106,8 +108,8 @@ run_test_detached() {
 	echo -n "Running test detached: $name "
 	expected_abduco_detached_output "$name" "$cmd" > "$output_expected" 2>&1
 
-	if $ABDUCO -n "$name" $cmd >/dev/null 2>&1 && sleep 1 &&
-	   $ABDUCO -a "$name" 2>&1 | sed 's/.$//' > "$output" &&
+	if $APPPATH -n "$name" $cmd >/dev/null 2>&1 && sleep 1 &&
+	   $APPPATH -a "$name" 2>&1 | sed 's/.$//' > "$output" &&
 	   diff -u "$output_expected" "$output" && check_environment; then
 		rm "$output" "$output_expected"
 		TESTS_OK=$((TESTS_OK + 1))
@@ -133,8 +135,8 @@ run_test_attached_detached() {
 	$cmd >/dev/null 2>&1
 	expected_abduco_epilog "$name" $? > "$output_expected" 2>&1
 
-	if detach | $ABDUCO $ABDUCO_OPTS -c "$name" $cmd >/dev/null 2>&1 && sleep 3 &&
-	   $ABDUCO -a "$name" 2>&1 | tail -1 | sed 's/.$//' > "$output" &&
+	if detach | $APPPATH $ABDUCO_OPTS -c "$name" $cmd >/dev/null 2>&1 && sleep 3 &&
+	   $APPPATH -a "$name" 2>&1 | tail -1 | sed 's/.$//' > "$output" &&
 	   diff -u "$output_expected" "$output" && check_environment; then
 		rm "$output" "$output_expected"
 		TESTS_OK=$((TESTS_OK + 1))
@@ -159,7 +161,7 @@ run_test_dvtm() {
 	local output_expected="$name.expected"
 
 	: > "$output_expected"
-	if dvtm_session | $ABDUCO -c "$name" > "$output" 2>&1 &&
+	if dvtm_session | $APPPATH -c "$name" > "$output" 2>&1 &&
 	   diff -u "$output_expected" "$output" && check_environment; then
 		rm "$output" "$output_expected"
 		TESTS_OK=$((TESTS_OK + 1))
