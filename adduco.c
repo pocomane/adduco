@@ -1324,6 +1324,13 @@ static int print_session_list(void) {
   return iter.info == 'E'; /* E -> error while iterating */
 }
 
+static int signal_to_session(int signal, const char* name) {
+	pid_t pid = session_exists(name);
+	if (!pid)
+		return -1;
+	return kill(pid, signal);
+}
+
 // --------------------------------------------------------------------------------
 // TUI
 
@@ -1753,10 +1760,7 @@ void tui_main(void) {
 			if (count > 0 && sel < count) {
 				const char *name = names[sel];
 				if (tui_confirm_kill(name)) {
-					pid_t pid = session_exists(name);
-					if (!pid)
-						tui_draw(names, count, sel, &top, "Session not found.");
-					else if (kill(pid, SIGTERM) == -1)
+					if (signal_to_session(SIGTERM, name))
 						tui_draw(names, count, sel, &top, "Could not kill session.");
 					else
 						tui_draw(names, count, sel, &top, "Session killed.");
@@ -1916,10 +1920,7 @@ int main(int argc, char *argv[]) {
 		}
 		break;
 	case 'k':
-		pid_t pid = session_exists(server.session_name);
-		if (!pid)
-			die("kill-session: session not found");
-		if (kill(pid, SIGTERM) == -1)
+		if (signal_to_session(SIGTERM, server.session_name))
 			die("kill-session: kill");
 		if (!quiet)
 			info("session killed");
