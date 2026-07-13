@@ -102,6 +102,7 @@ enum PacketType {
 	MSG_EXIT    = 4,
 	MSG_PID     = 5,
 	MSG_RENAME  = 6,
+	MSG_SIGNAL  = 7,
 };
 
 typedef struct {
@@ -720,6 +721,9 @@ static void server_mainloop(void) {
 					server_send_packet(c, &ack);
 					break;
 				}
+				case MSG_SIGNAL:
+					kill(getpid(), client_packet.u.i);
+					break;
 				default: /* ignore package */
 					break;
 				}
@@ -918,13 +922,20 @@ static int session_connect(const char *name) {
 	return fd;
 }
 
+static pid_t session_get_connection_ack() {
+	Packet pkt = {0};
+	pid_t pid = 0;
+	if (client_recv_packet(&pkt) && pkt.type == MSG_PID)
+		pid = pkt.u.l;
+	return pid;
+}
+
 static pid_t session_exists(const char *name) {
 	Packet pkt;
 	pid_t pid = 0;
 	if ((server.socket = session_connect(name)) == -1)
 		return pid;
-	if (client_recv_packet(&pkt) && pkt.type == MSG_PID)
-		pid = pkt.u.l;
+	pid = session_get_connection_ack();
 	close(server.socket);
 	return pid;
 }
@@ -1216,19 +1227,16 @@ static bool attach_session(const char *name, const bool terminate) {
 static bool rename_session(const char *name, const char *newname) {
 	bool result = false;
 
-	/* connect to the running session */
 	if (server.socket > 0)
 		close(server.socket);
 	if ((server.socket = session_connect(name)) == -1)
 		return false;
 
-	Packet pkt;
-
-	/* wait the ack to not mess with packages */
-	if (!client_recv_packet(&pkt) || pkt.type != MSG_PID)
+	if (!session_get_connection_ack())
 		goto end;
 
 	/* ask the session server to rename the communication socket */
+	Packet pkt;
 	pkt.type = MSG_RENAME;
 	pkt.len = strlen(newname) + 1;
 	if (pkt.len >= sizeof(pkt.u.msg))
@@ -1240,10 +1248,10 @@ static bool rename_session(const char *name, const char *newname) {
 
 	/* wait for the server to acknowledge the rename */
 	pkt.type = MSG_PID;
-	if (!client_recv_packet(&pkt))
+	if (!client_recv_packet(&pkt) || pkt.type != MSG_RENAME)
 		goto end;
 
-	result = pkt.type == MSG_RENAME && pkt.u.i == 1;
+	result = (pkt.u.i == 1);
 
 end:
 	close(server.socket);
@@ -1325,10 +1333,23 @@ static int print_session_list(void) {
 }
 
 static int signal_to_session(int signal, const char* name) {
-	pid_t pid = session_exists(name);
-	if (!pid)
+	if (server.socket > 0)
+		close(server.socket);
+	if ((server.socket = session_connect(name)) == -1)
 		return -1;
-	return kill(pid, signal);
+
+	Packet pkt = {
+		.type = MSG_SIGNAL,
+		.u.i = signal,
+		.len = sizeof(pkt.u.i),
+	};
+	if (!client_send_packet(&pkt)) {
+		close(server.socket);
+		return -1;
+	}
+	int result = session_get_connection_ack() ? 0 : -1; 
+	close(server.socket);
+	return result;
 }
 
 // --------------------------------------------------------------------------------
