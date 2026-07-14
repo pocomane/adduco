@@ -64,7 +64,7 @@
 #endif
 
 /* default command to execute if non is given and $ABDUCO_CMD is unset */
-#define ABDUCO_CMD "dvtm"
+#define ABDUCO_CMD "sh"
 /* default detach key, can be overriden at run time using -e option */
 static char KEY_DETACH = CTRL('\\');
 /* redraw key to send a SIGWINCH signal to underlying process
@@ -847,7 +847,7 @@ static void print_help(void) {
 		"- `SIGTERM` Detaches a client.\n"
 		"\n"
 		"Environment:\n"
-		"- `ABDUCO_CMD` Command to run if none specified; defaults to dvtm. |\n"
+		"- `ABDUCO_CMD` Command to run if none specified; defaults to `sh`. |\n"
 		"- `ABDUCO_SESSION` Current session name visible to the command. |\n"
 		"- `ABDUCO_SOCKET` Absolute path to the session socket. |\n"
 		"\n"
@@ -861,7 +861,7 @@ static void print_help(void) {
 		"\n"
 		"Examples:\n"
 		"~~~\n"
-		"# Start a new session (runs dvtm by default)\n"
+		"# Start a new session (runs `sh` by default)\n"
 		"abduco -c my-session\n"
 		"\n"
 		"# Detach with Ctrl+\\, then reattach later\n"

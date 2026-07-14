@@ -17,24 +17,6 @@ detach() {
 	printf ""
 }
 
-dvtm_cmd() {
-	printf "$1\n"
-	sleep 1
-}
-
-dvtm_session() {
-	sleep 1
-	dvtm_cmd 'c'
-	dvtm_cmd 'c'
-	dvtm_cmd 'c'
-	sleep 1
-	dvtm_cmd ' '
-	dvtm_cmd ' '
-	dvtm_cmd ' '
-	sleep 1
-	dvtm_cmd 'qq'
-}
-
 expected_abduco_prolog() {
 	printf "[?1049h[H"
 }
@@ -148,31 +130,6 @@ run_test_attached_detached() {
 	fi
 }
 
-run_test_dvtm() {
-	echo -n "Running dvtm test: "
-	if ! which dvtm >/dev/null 2>&1; then
-		echo "SKIPPED"
-		return 0;
-	fi
-
-	TESTS_RUN=$((TESTS_RUN + 1))
-	local name="dvtm"
-	local output="$name.out"
-	local output_expected="$name.expected"
-
-	: > "$output_expected"
-	if dvtm_session | $APPPATH -c "$name" > "$output" 2>&1 &&
-	   diff -u "$output_expected" "$output" && check_environment; then
-		rm "$output" "$output_expected"
-		TESTS_OK=$((TESTS_OK + 1))
-		echo "OK"
-		return 0
-	else
-		echo "FAIL"
-		return 1
-	fi
-}
-
 test_non_existing_command || echo "Execution of non existing command FAILED"
 
 run_test_attached "awk" "awk 'BEGIN {for(i=1;i<=1000;i++) print i}'"
@@ -211,7 +168,5 @@ chmod +x long-running.sh
 run_test_attached_detached "attach-detach" "./long-running.sh"
 
 rm ./long-running.sh
-
-run_test_dvtm
 
 [ $TESTS_OK -eq $TESTS_RUN ]
