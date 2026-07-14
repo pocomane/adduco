@@ -1396,6 +1396,11 @@ enum {
 	KEY_ATTACH_RO,
 };
 
+struct tui_session {
+	char *name;
+	char *info;
+};
+
 static struct termios orig_term;
 static int raw_active = 0;
 
@@ -1500,7 +1505,7 @@ static int tui_clear_for_lines(int lines) {
 }
 
 /* redraw the whole menu, keeping the selection visible (simple viewport) */
-static void tui_draw(char **names, int count, int sel, int *top, const char *msg) {
+static void tui_draw(struct tui_session *names, int count, int sel, int *top, const char *msg) {
 
 	int avail = tui_clear_for_lines(count + 3); /* items + title + help + status/empty line */
 
@@ -1527,10 +1532,8 @@ static void tui_draw(char **names, int count, int sel, int *top, const char *msg
 			if (idx >= count)
 				break;
 			fputs(idx == sel ? "\033[7m" : "\033[0m", stdout);
-			fputs(idx == sel ? " > " : "   ", stdout);
-			const char *name = names[idx];
-			fputs(name, stdout);
-			fputs(" ", stdout);
+			fputs(idx == sel ? " >" : "  ", stdout);
+			fprintf(stdout, "%s", names[idx].info);
 			fputs("\033[0m\r\n", stdout);
 		}
 	}
@@ -1543,28 +1546,36 @@ static void tui_draw(char **names, int count, int sel, int *top, const char *msg
 	fflush(stdout);
 }
 
-static void session_list_free(char **names, int count) {
+static void session_list_free(struct tui_session *names, int count) {
 	if (!names)
 		return;
-	for (int i = 0; i < count; i++)
-		free(names[i]);
+	for (int i = 0; i < count; i++){
+		free(names[i].name);
+		free(names[i].info);
+  }
 	free(names);
 }
 
 /* Collect the names of all active sessions into *names Returns the number of
  * sessions or -1 on error. */
-static void tui_session_list(char ***names, int *count) {
+static void tui_session_list(struct tui_session **names, int *count) {
 	if (*count > 0){
 		session_list_free(*names, *count);
 	}
 	*count = 0;
-	char **list = NULL;
+	struct tui_session *list = NULL;
 	struct session_iterator iter = {0};
 	while(iterate_over_sessions(&iter)){
-		char **tmp = realloc(list, (*count + 1) * sizeof *tmp);
+		struct tui_session *tmp = realloc(list, (*count + 1) * sizeof *tmp);
 		if (tmp) {
+			char fmt[] = " %s [%c] %d";
+			int needed = snprintf(NULL, 0, fmt, iter.namelist[iter.current]->d_name, iter.info, iter.pid);
+			char * info = calloc(needed+1, 1);
+			snprintf(info, needed+1, fmt, iter.namelist[iter.current]->d_name, iter.info, iter.pid);
 			list = tmp;
-			list[(*count)++] = strdup(iter.namelist[iter.current]->d_name);
+			list[(*count)].name = strdup(iter.namelist[iter.current]->d_name);
+			list[(*count)].info = info;
+			(*count)++;
 		}
 	}
 	*names = list;
@@ -1647,7 +1658,7 @@ static char *tui_read_line(const char *prompt) {
 /* Prompt the user for a command to run and a session name, then create a new
  * session. Pressing ESC at any prompt cancels and returns to the session list.
  * If a session with the given name already exists, an error is shown. */
-static void tui_create_session(char **names, int count, int sel, int *top) {
+static void tui_create_session(struct tui_session *names, int count, int sel, int *top) {
 	const char *msg;
 	char *argv[4];
 	char *cmd = tui_read_line("Command to run (ESC to cancel): ");
@@ -1702,8 +1713,8 @@ out:
  * malloc'd new session name is returned and its ownership transferred to the
  * caller, so the selection can be kept on the renamed session. If the new name
  * is empty or already in use, NULL is returned. */
-static char *tui_rename_session(char **names, int count, int sel, int *top) {
-	char *name = names[sel];
+static char *tui_rename_session(struct tui_session *names, int count, int sel, int *top) {
+	char *name = names[sel].name;
 	char *newname = tui_read_line("New session name (ESC to cancel): ");
 	if (!newname)
 		return NULL;
@@ -1723,17 +1734,17 @@ static char *tui_rename_session(char **names, int count, int sel, int *top) {
 
 /* Resolve the index of the session named 'sel' within 'names', or return -1
  * if no session with that name is currently present. */
-static int tui_find_index(char **names, int count, const char *sel) {
+static int tui_find_index(struct tui_session *names, int count, const char *sel) {
 	if (!sel)
 		return -1;
 	for (int i = 0; i < count; i++)
-		if (strcmp(names[i], sel) == 0)
+		if (strcmp(names[i].name, sel) == 0)
 			return i;
 	return -1;
 }
 
 void tui_main(void) {
-	char **names = NULL;
+	struct tui_session *names = NULL;
 	int count = 0;
 	char *sel_name = NULL;   /* canonical selection: name of the chosen session */
 	int sel;                 /* derived index into names[], resolved each refresh */
@@ -1754,7 +1765,7 @@ void tui_main(void) {
 		if (sel < 0) {
 			sel = 0;
 			free(sel_name);
-			sel_name = count > 0 ? strdup(names[0]) : NULL;
+			sel_name = count > 0 ? strdup(names[0].name) : NULL;
 		}
 
 		tui_draw(names, count, sel, &top, NULL);
@@ -1766,17 +1777,17 @@ void tui_main(void) {
 			if (sel > 0) {
 				sel--;
 				free(sel_name);
-				sel_name = strdup(names[sel]);
+				sel_name = strdup(names[sel].name);
 			}
 		} else if (k == KEY_DOWN) {
 			if (sel < count - 1) {
 				sel++;
 				free(sel_name);
-				sel_name = strdup(names[sel]);
+				sel_name = strdup(names[sel].name);
 			}
 		} else if (k == KEY_ENTER) {
 			if (count > 0 && sel < count) {
-				char *name = strdup(names[sel]);
+				char *name = strdup(names[sel].name);
 				session_list_free(names, count);
 				names = NULL;
 				count = 0;
@@ -1791,7 +1802,7 @@ void tui_main(void) {
 			}
 		} else if (k == KEY_ATTACH_RO) {
 			if (count > 0 && sel < count) {
-				char *name = strdup(names[sel]);
+				char *name = strdup(names[sel].name);
 				session_list_free(names, count);
 				names = NULL;
 				count = 0;
@@ -1808,7 +1819,7 @@ void tui_main(void) {
 			}
 		} else if (k == KEY_KILL) {
 			if (count > 0 && sel < count) {
-				const char *name = names[sel];
+				const char *name = names[sel].name;
 				if (tui_confirm_kill(name)) {
 					if (signal_to_session(SIGTERM, name))
 						tui_draw(names, count, sel, &top, "Could not kill session.");
