@@ -73,14 +73,19 @@ static char KEY_REDRAW = 0;
 /* Where to place the "abduco" directory storing all session socket files.
  * The first directory to succeed is used. */
 static struct Dir {
-	char *path;    /* fixed (absolute) path to a directory */
-	char *env;     /* environment variable to use if (set) */
-	bool personal; /* if false a user owned sub directory will be created */
+	enum {
+		SKIP,         /* placeholder for command line argument */
+		PERSONAL_ENV, /* environment variable pointing to personal folder (/adduco will be added) */
+		COMMON_ENV,   /* environment variable pointing to folder shared among users (/adduco/username will be added_ */
+		PATH,         /* absolute path to a directory (nothing will be added) */
+	} mode;
+	char *reference;
 } socket_dirs[] = {
-	{ .env  = "ABDUCO_SOCKET_DIR", false },
-	{ .env  = "HOME",              true  },
-	{ .env  = "TMPDIR",            false },
-	{ .path = "/tmp",              false },
+	{ SKIP,         ""},
+	{ COMMON_ENV,   "ABDUCO_SOCKET_DIR"},
+	{ PERSONAL_ENV, "HOME"},
+	{ COMMON_ENV,   "TMPDIR"},
+	{ PATH,         "/tmp/adduco"},
 };
 
 // --------------------------------------------------------------------------------
@@ -961,8 +966,14 @@ static bool session_alive(const char *name) {
 
 static bool create_socket_dir(char *path, int path_max_len) {
 	struct sockaddr_un s = {
-	.sun_family = AF_UNIX,
+		.sun_family = AF_UNIX,
 	};
+	static char cache[sizeof(s.sun_path)] = {0};
+	if (cache[0]){
+		strncpy(path, cache, path_max_len);
+		return true;
+	}
+
 	struct sockaddr_un *sockaddr = &s;
 	int socketfd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (socketfd == -1)
@@ -973,25 +984,32 @@ static bool create_socket_dir(char *path, int path_max_len) {
 	struct passwd *pw = getpwuid(uid);
 
 	for (unsigned int i = 0; i < countof(socket_dirs); i++) {
-		struct stat sb;
 		struct Dir *dir = &socket_dirs[i];
+		if (dir->mode == SKIP)
+			continue;
+		char *selected = NULL;
 		bool ishome = false;
-		if (dir->env) {
-			dir->path = getenv(dir->env);
-			ishome = !strcmp(dir->env, "HOME");
-			if (ishome && (!dir->path || !dir->path[0]) && pw)
-				dir->path = pw->pw_dir;
+		if (dir->mode == PERSONAL_ENV || dir->mode == COMMON_ENV) {
+			selected = getenv(dir->reference);
+			ishome = !strcmp(dir->reference, "HOME");
+			if (ishome && (!selected || !selected[0]) && pw)
+				selected = pw->pw_dir;
 		}
-		if (!dir->path || !dir->path[0])
+		if (dir->mode == PATH)
+			selected = dir->reference;
+		if (!selected || !selected[0])
 			continue;
-		if (!xsnprintf(sockaddr->sun_path, maxlen, "%s/%s%s/", dir->path, ishome ? "." : "", server.name))
-			continue;
+		if (dir->mode != PATH)
+			if (!xsnprintf(sockaddr->sun_path, maxlen, "%s/%s%s/", selected, ishome ? "." : "", server.name))
+				continue;
 		mode_t mask = umask(0);
-		int r = mkdir(sockaddr->sun_path, dir->personal ? S_IRWXU : S_IRWXU|S_IRWXG|S_IRWXO|S_ISVTX);
+		int personal = PERSONAL_ENV == dir->mode;
+		int r = mkdir(sockaddr->sun_path, personal ? S_IRWXU : S_IRWXU|S_IRWXG|S_IRWXO|S_ISVTX);
 		umask(mask);
 		if (r != 0 && errno != EEXIST)
 			continue;
 		errno = 0;
+		struct stat sb;
 		if (lstat(sockaddr->sun_path, &sb) != 0)
 			continue;
 		if (!S_ISDIR(sb.st_mode)) {
@@ -1000,7 +1018,7 @@ static bool create_socket_dir(char *path, int path_max_len) {
 		}
 
 		size_t dirlen = strlen(sockaddr->sun_path);
-		if (!dir->personal) {
+		if (!personal) {
 			/* create subdirectory only accessible to user */
 			if (pw && !xsnprintf(sockaddr->sun_path+dirlen, maxlen-dirlen, "%s/", pw->pw_name))
 				continue;
@@ -1029,12 +1047,11 @@ static bool create_socket_dir(char *path, int path_max_len) {
 		if (bind(socketfd, (struct sockaddr*)sockaddr, socklen) == -1)
 			continue;
 		unlink(sockaddr->sun_path);
-		close(socketfd);
 		sockaddr->sun_path[dirlen] = '\0';
 
-		if (!xsnprintf(path, path_max_len, "%s", sockaddr->sun_path))
-			continue;
-		
+		strncpy(cache, sockaddr->sun_path, sizeof(cache));
+		strncpy(path, cache, path_max_len);
+		close(socketfd);
 		return true;
 	}
 
