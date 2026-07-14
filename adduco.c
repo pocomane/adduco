@@ -162,23 +162,9 @@ static struct sockaddr_un sockaddr = {
 };
 
 static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name);
-static void die(const char *s);
-static void info(const char *str, ...);
 
 // --------------------------------------------------------------------------------
 // Debug
-
-#ifdef NDEBUG
-static void debug(const char *errstr, ...) { }
-static void print_packet(const char *prefix, Packet *pkt) { }
-#else
-
-static void debug(const char *errstr, ...) {
-	va_list ap;
-	va_start(ap, errstr);
-	vfprintf(stderr, errstr, ap);
-	va_end(ap);
-}
 
 static void print_packet(const char *prefix, Packet *pkt) {
 	static const char *msgtype[] = {
@@ -196,6 +182,10 @@ static void print_packet(const char *prefix, Packet *pkt) {
 	fprintf(stderr, "%s: %s ", prefix, type);
 	switch (pkt->type) {
 	case MSG_CONTENT:
+		fprintf(stderr, " hex: ");
+		for (int c = 0; c < pkt->len; c += 1)
+			fprintf(stderr, "%02x", pkt->u.msg[c]);
+		fprintf(stderr, " char: ");
 		fwrite(pkt->u.msg, pkt->len, 1, stderr);
 		break;
 	case MSG_RESIZE:
@@ -219,7 +209,46 @@ static void print_packet(const char *prefix, Packet *pkt) {
 	fprintf(stderr, "\n");
 }
 
-#endif /* NDEBUG */
+enum InfoType {
+	ERROR = 1,
+	ERROR_LIB,
+	INFO,
+	DEBUG,
+	DEBUG_PACKET,
+};
+
+static void info(enum InfoType type, const char *str, ...) {
+	if (!type) return;
+#ifdef NDEBUG
+	if (type == DEBUG) return;
+	if (type == DEBUG_PACKET) return;
+#endif
+	char* liberr = NULL;
+	if (ERROR_LIB == type)
+		liberr = (char*) strerror(errno);
+	va_list ap;
+	va_start(ap, str);
+#ifndef NDEBUG
+	if (type == DEBUG_PACKET){
+		print_packet(str, va_arg(ap, Packet *));
+		return;
+	}
+#endif
+	if (str && !quiet) {
+		fprintf(stderr, "%s: %s: ", server.name, server.session_name);
+		vfprintf(stderr, str, ap);
+		if (liberr)
+			fprintf(stderr, " - %s", liberr);
+		fprintf(stderr, "\r\n");
+		fflush(stderr);
+	}
+	va_end(ap);
+}
+
+static void die(const char *s) {
+	info(ERROR_LIB, "%s", s);
+	exit(EXIT_FAILURE);
+}
 
 // --------------------------------------------------------------------------------
 // Packet IO
@@ -233,7 +262,7 @@ static size_t packet_size(Packet *pkt) {
 }
 
 static ssize_t write_all(int fd, const char *buf, size_t len) {
-	debug("write_all(%d)\n", len);
+	info(DEBUG, "write_all(%d)\n", len);
 	ssize_t ret = len;
 	while (len > 0) {
 		ssize_t res = write(fd, buf, len);
@@ -251,7 +280,7 @@ static ssize_t write_all(int fd, const char *buf, size_t len) {
 }
 
 static ssize_t read_all(int fd, char *buf, size_t len) {
-	debug("read_all(%d)\n", len);
+	info(DEBUG, "read_all(%d)\n", len);
 	ssize_t ret = len;
 	while (len > 0) {
 		ssize_t res = read(fd, buf, len);
@@ -301,20 +330,20 @@ static void client_sigwinch_handler(int sig) {
 }
 
 static bool client_send_packet(Packet *pkt) {
-	print_packet("client-send:", pkt);
+	info(DEBUG_PACKET, "client-send:", pkt);
 	if (send_packet(server.socket, pkt))
 		return true;
-	debug("FAILED\n");
+	info(DEBUG, "FAILED\n");
 	server.running = false;
 	return false;
 }
 
 static bool client_recv_packet(Packet *pkt) {
 	if (recv_packet(server.socket, pkt)) {
-		print_packet("client-recv:", pkt);
+		info(DEBUG_PACKET, "client-recv:", pkt);
 		return true;
 	}
-	debug("client-recv: FAILED\n");
+	info(DEBUG, "client-recv: FAILED\n");
 	server.running = false;
 	return false;
 }
@@ -418,7 +447,7 @@ static int client_mainloop(void) {
 			if (len == -1 && errno != EAGAIN && errno != EINTR)
 				die("client-stdin");
 			if (len > 0) {
-				debug("client-stdin: %c\n", pkt.u.msg[0]);
+				info(DEBUG, "client-stdin: %c\n", pkt.u.msg[0]);
 				pkt.len = len;
 				if (KEY_REDRAW && pkt.u.msg[0] == KEY_REDRAW) {
 					client.need_resize = true;
@@ -432,7 +461,7 @@ static int client_mainloop(void) {
 					client_send_packet(&pkt);
 				}
 			} else if (len == 0) {
-				debug("client-stdin: EOF\n");
+				info(DEBUG, "client-stdin: EOF\n");
 				return -1;
 			}
 		}
@@ -530,35 +559,35 @@ static bool server_read_pty(Packet *pkt) {
 		server.running = false;
 	else if (len == -1 && errno != EAGAIN && errno != EINTR && errno != EWOULDBLOCK)
 		server.running = false;
-	print_packet("server-read-pty:", pkt);
+	info(DEBUG_PACKET, "server-read-pty:", pkt);
 	return len > 0;
 }
 
 static bool server_write_pty(Packet *pkt) {
-	print_packet("server-write-pty:", pkt);
+	info(DEBUG_PACKET, "server-write-pty:", pkt);
 	size_t size = pkt->len;
 	if (write_all(server.pty, pkt->u.msg, size) == size)
 		return true;
-	debug("FAILED\n");
+	info(DEBUG, "FAILED\n");
 	server.running = false;
 	return false;
 }
 
 static bool server_recv_packet(Client *c, Packet *pkt) {
 	if (recv_packet(c->socket, pkt)) {
-		print_packet("server-recv:", pkt);
+		info(DEBUG_PACKET, "server-recv:", pkt);
 		return true;
 	}
-	debug("server-recv: FAILED\n");
+	info(DEBUG, "server-recv: FAILED\n");
 	c->state = STATE_DISCONNECTED;
 	return false;
 }
 
 static bool server_send_packet(Client *c, Packet *pkt) {
-	print_packet("server-send:", pkt);
+	info(DEBUG_PACKET, "server-send:", pkt);
 	if (send_packet(c->socket, pkt))
 		return true;
-	debug("FAILED\n");
+	info(DEBUG, "FAILED\n");
 	c->state = STATE_DISCONNECTED;
 	return false;
 }
@@ -574,7 +603,7 @@ static void server_pty_died_handler(int sig) {
 		server_mark_socket_exec(true, false);
 	}
 
-	debug("server pty died: %d\n", server.exit_status);
+	info(DEBUG, "server pty died: %d\n", server.exit_status);
 	errno = errsv;
 }
 
@@ -697,7 +726,7 @@ static void server_mainloop(void) {
 				case MSG_RESIZE:
 					c->state = STATE_ATTACHED;
 					if (!(c->flags & CLIENT_READONLY) && c == server.clients) {
-						debug("server-ioct: TIOCSWINSZ\n");
+						info(DEBUG, "server-ioct: TIOCSWINSZ\n");
 						struct winsize ws = { 0 };
 						ws.ws_row = client_packet.u.ws.rows;
 						ws.ws_col = client_packet.u.ws.cols;
@@ -776,23 +805,6 @@ static void server_mainloop(void) {
 
 // --------------------------------------------------------------------------------
 // Application functions
-
-static void info(const char *str, ...) {
-	va_list ap;
-	va_start(ap, str);
-	if (str && !quiet) {
-		fprintf(stderr, "%s: %s: ", server.name, server.session_name);
-		vfprintf(stderr, str, ap);
-		fprintf(stderr, "\r\n");
-		fflush(stderr);
-	}
-	va_end(ap);
-}
-
-static void die(const char *s) {
-	perror(s);
-	exit(EXIT_FAILURE);
-}
 
 static void print_help(void) {
 	fprintf(stdout, "%s",
@@ -1212,11 +1224,11 @@ static bool attach_session(const char *name, const bool terminate) {
 	int status = client_mainloop();
 	client_restore_terminal();
 	if (status == -1) {
-		info("detached");
+		info(INFO, "detached");
 	} else if (status == -EIO) {
-		info("exited due to I/O errors");
+		info(INFO, "exited due to I/O errors");
 	} else {
-		info("session terminated with exit status %d", status);
+		info(INFO, "session terminated with exit status %d", status);
 		if (terminate)
 			exit(status);
 	}
@@ -1915,7 +1927,7 @@ int main(int argc, char *argv[]) {
 	case 'c':
 		if (force) {
 			if (session_alive(server.session_name)) {
-				info("session exists and has not yet terminated");
+				info(INFO, "session exists and has not yet terminated");
 				return 1;
 			}
 			if (session_exists(server.session_name))
@@ -1944,13 +1956,13 @@ int main(int argc, char *argv[]) {
 		if (signal_to_session(SIGTERM, server.session_name))
 			die("kill-session: kill");
 		if (!quiet)
-			info("session killed");
+			info(INFO, "session killed");
 		break;
 	case 'm':
 		if (!rename_session(server.session_name, rename_target)) {
 			die("can not rename session");
 		} else if (!quiet) {
-			info("session renamed to %s", rename_target);
+			info(INFO, "session renamed to %s", rename_target);
 		}
 		break;
 	case 'i':
