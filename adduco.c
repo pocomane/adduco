@@ -1,19 +1,19 @@
-/*
- * Copyright (c) 2013-2018 Marc André Tanner <mat at brain-dump.org>,
- * 2026 Mimmo Mane <github/pocomane>.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- */
+//
+// Copyright (c) 2013-2018 Marc André Tanner <mat at brain-dump.org>,
+// 2026 Mimmo Mane <github/pocomane>.
+//
+// Permission to use, copy, modify, and/or distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//
 
 // --------------------------------------------------------------------------------
 // Core header inclusion
@@ -64,15 +64,15 @@
 #define VERSION "v0.develop"
 #endif
 
-/* default command to execute if non is given and $ADDUCO_CMD is unset */
+// default command to execute if non is given and $ADDUCO_CMD is unset
 #define ADDUCO_CMD "sh"
-/* default detach key, can be overriden at run time using -e option */
+// default detach key, can be overriden at run time using -e option
 static char KEY_DETACH = CTRL('\\');
-/* redraw key to send a SIGWINCH signal to underlying process
- * (set to 0 to disable the redraw key) */
+// redraw key to send a SIGWINCH signal to underlying process
+// (set to 0 to disable the redraw key)
 static char KEY_REDRAW = 0;
-/* Where to place the "adduco" directory storing all session socket files.
- * The first directory to succeed is used. */
+// Where to place the "adduco" directory storing all session socket files.
+// The first directory to succeed is used.
 static struct Dir {
 	enum {
 		SKIP,         /* placeholder for command line argument */
@@ -664,7 +664,7 @@ static bool server_rename_session(const char *newname) {
 	strncpy(oldpath, sockaddr.sun_path, sizeof(oldpath) - 1);
 	oldpath[sizeof(oldpath) - 1] = (char)0;
 	
-	/* create the new communication socket at the new path */
+	// create the new communication socket at the new path
 	int newfd = server_create_socket(newname);
 	if (newfd == -1)
 		return false;
@@ -674,7 +674,7 @@ static bool server_rename_session(const char *newname) {
 	server.socket = newfd;
 	unlink(oldpath);
 
-	/* keep session name in sync for SIGUSR1 recreation */
+	// keep session name in sync for SIGUSR1 recreation
 	strncpy(server.session_name, newname, sizeof(server.session_name));
 	server.session_name[sizeof(server.session_name)-1] = '\0';
 	return true;
@@ -744,16 +744,16 @@ static void server_mainloop(void) {
 					}
 					pid_t fg = tcgetpgrp(server.pty);
 					if (fg > 0)
-						/* Send SIGWINCH to the foreground process group of the pty. This
-						 * is needed when the supervised (e.g. sh) launched an
-						 * interactive program (e.g. vim) */
+						// Send SIGWINCH to the foreground process group of the pty. This
+						// is needed when the supervised (e.g. sh) launched an
+						// interactive program (e.g. vim)
 						kill(-fg, SIGWINCH);
 					else
 						kill(-server.pid, SIGWINCH);
 					break;
 				case MSG_EXIT:
 					exit_packet_delivered = true;
-					/* fall through */
+					// fall through
 				case MSG_DETACH:
 					c->state = STATE_DISCONNECTED;
 					break;
@@ -1028,7 +1028,7 @@ static bool create_socket_dir(char *path, int path_max_len) {
 
 		size_t dirlen = strlen(sockaddr->sun_path);
 		if (!personal) {
-			/* create subdirectory only accessible to user */
+			// create subdirectory only accessible to user
 			if (pw && !xsnprintf(sockaddr->sun_path+dirlen, maxlen-dirlen, "%s/", pw->pw_name))
 				continue;
 			if (!pw && !xsnprintf(sockaddr->sun_path+dirlen, maxlen-dirlen, "%d/", uid))
@@ -1108,15 +1108,15 @@ static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 }
 
 static bool create_session(const char *name, char * const argv[]) {
-	/* this uses the well known double fork strategy as described in section 1.7 of
-	 *
-	 *  http://www.faqs.org/faqs/unix-faq/programmer/faq/
-	 *
-	 * pipes are used for synchronization and error reporting i.e. the child sets
-	 * the close on exec flag before calling execvp(3) the parent blocks on a read(2)
-	 * in case of failure the error message is written to the pipe, success is
-	 * indicated by EOF on the pipe.
-	 */
+	// this uses the well known double fork strategy as described in section 1.7 of
+	//
+	//  http://www.faqs.org/faqs/unix-faq/programmer/faq/
+	//
+	// pipes are used for synchronization and error reporting i.e. the child sets
+	// the close on exec flag before calling execvp(3) the parent blocks on a read(2)
+	// in case of failure the error message is written to the pipe, success is
+	// indicated by EOF on the pipe.
+	//
 	int client_pipe[2], server_pipe[2];
 	pid_t pid;
 	char errormsg[255];
@@ -1273,7 +1273,7 @@ static bool rename_session(const char *name, const char *newname) {
 	if (!session_get_connection_ack())
 		goto end;
 
-	/* ask the session server to rename the communication socket */
+	// ask the session server to rename the communication socket
 	Packet pkt;
 	pkt.type = MSG_RENAME;
 	pkt.len = strlen(newname) + 1;
@@ -1284,7 +1284,7 @@ static bool rename_session(const char *name, const char *newname) {
 	if (!send_packet(server.socket, &pkt))
 		goto end;
 
-	/* wait for the server to acknowledge the rename */
+	// wait for the server to acknowledge the rename
 	pkt.type = MSG_PID;
 	if (!client_recv_packet(&pkt) || pkt.type != MSG_RENAME)
 		goto end;
@@ -1318,7 +1318,7 @@ struct session_iterator {
 	char info;
 };
 
-/* continue to iterate over sessions, stop when it returns false */
+// continue to iterate over sessions, stop when it returns false
 static int iterate_over_sessions(struct session_iterator *result) {
 	result->info = 'E'; /* iteration error */
 	if (!result->namelist) {
@@ -1413,18 +1413,18 @@ struct tui_session {
 static struct termios orig_term;
 static int raw_active = 0;
 
-/* restore the terminal to its original settings (idempotent) */
+// restore the terminal to its original settings (idempotent)
 static void tui_restore_term(void) {
 	if (raw_active) {
 		tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
 		raw_active = 0;
 	}
-	/* make sure the cursor is visible again */
+	// make sure the cursor is visible again
 	fputs("\033[?25h", stdout);
 	fflush(stdout);
 }
 
-/* switch the terminal into raw mode so we can read single key presses */
+// switch the terminal into raw mode so we can read single key presses
 static void tui_enter_raw(void) {
 	if (tcgetattr(STDIN_FILENO, &orig_term) == -1)
 		return;
@@ -1441,8 +1441,8 @@ static void tui_enter_raw(void) {
 	raw_active = 1;
 }
 
-/* read a single byte from stdin, waiting at most timeout_ms (or forever if < 0).
- * returns the byte or -1 on timeout / error / EOF. */
+// read a single byte from stdin, waiting at most timeout_ms (or forever if < 0).
+// returns the byte or -1 on timeout / error / EOF.
 static int tui_read_byte(int timeout_ms) {
 	fd_set fds;
 	FD_ZERO(&fds);
@@ -1461,7 +1461,7 @@ static int tui_read_byte(int timeout_ms) {
 	return b;
 }
 
-/* read and decode the next key press */
+// read and decode the next key press
 static int tui_read_key(void) {
 
 	int c = tui_read_byte(-1);
@@ -1481,7 +1481,7 @@ static int tui_read_key(void) {
 	case 'k': return KEY_UP;
 	case 27:
 
-		/* an escape sequence (e.g. arrow keys) starts with ESC [ <letter> */
+		// an escape sequence (e.g. arrow keys) starts with ESC [ <letter>
 		c = tui_read_byte(50);
 		if (c < 0)
 			return KEY_QUIT;   /* lone ESC -> quit */
@@ -1513,7 +1513,7 @@ static int tui_clear_for_lines(int lines) {
 	return lines;
 }
 
-/* redraw the whole menu, keeping the selection visible (simple viewport) */
+// redraw the whole menu, keeping the selection visible (simple viewport)
 static void tui_draw(struct tui_session *names, int count, int sel, int *top, const char *msg) {
 
 	int avail = tui_clear_for_lines(count + 3); /* items + title + help + status/empty line */
@@ -1565,8 +1565,8 @@ static void session_list_free(struct tui_session *names, int count) {
 	free(names);
 }
 
-/* Collect the names of all active sessions into *names Returns the number of
- * sessions or -1 on error. */
+// Collect the names of all active sessions into *names Returns the number of
+// sessions or -1 on error.
 static void tui_session_list(struct tui_session **names, int *count) {
 	if (*count > 0){
 		session_list_free(*names, *count);
@@ -1590,10 +1590,10 @@ static void tui_session_list(struct tui_session **names, int *count) {
 	*names = list;
 }
 
-/* Keep a stable ordering of sessions across refreshes. */
+// Keep a stable ordering of sessions across refreshes.
 static void tui_apply_order(struct tui_session *names, int count,
                             char ***order, int *order_count) {
-	/* No sessions left: forget the saved ordering entirely. */
+	// No sessions left: forget the saved ordering entirely.
 	if (count <= 0) {
 		for (int i = 0; i < *order_count; i++)
 			free((*order)[i]);
@@ -1608,7 +1608,7 @@ static void tui_apply_order(struct tui_session *names, int count,
 	char **new_order = NULL;
 	int new_count = 0;
 
-	/* Pass 1: keep the relative order of known sessions still present. */
+	// Pass 1: keep the relative order of known sessions still present.
 	for (int o = 0; o < *order_count; o++) {
 		for (int i = 0; i < count; i++) {
 			if (!placed[i] && strcmp(names[i].name, (*order)[o]) == 0) {
@@ -1620,7 +1620,7 @@ static void tui_apply_order(struct tui_session *names, int count,
 			}
 		}
 	}
-	/* Pass 2: append sessions never seen before, at the end. */
+	// Pass 2: append sessions never seen before, at the end.
 	for (int i = 0; i < count; i++) {
 		if (!placed[i]) {
 			pos[i] = new_count++;
@@ -1630,14 +1630,14 @@ static void tui_apply_order(struct tui_session *names, int count,
 		}
 	}
 
-	/* Physically reorder the names array (move the struct values). */
+	// Physically reorder the names array (move the struct values).
 	struct tui_session *tmp = calloc(count, sizeof(struct tui_session));
 	for (int i = 0; i < count; i++)
 		tmp[pos[i]] = names[i];
 	memcpy(names, tmp, count * sizeof(struct tui_session));
 	free(tmp);
 
-	/* Replace the persistent ordering with the new one. */
+	// Replace the persistent ordering with the new one.
 	for (int o = 0; o < *order_count; o++)
 		free((*order)[o]);
 	free(*order);
@@ -1648,7 +1648,7 @@ static void tui_apply_order(struct tui_session *names, int count,
 	free(pos);
 }
 
-/* Move a session to the front of the persistent session ordering.*/
+// Move a session to the front of the persistent session ordering.
 static void tui_bump_to_front(char ***order, int *order_count, const char *name) {
 	if (!name || !order || !order_count || *order_count <= 1)
 		return;
@@ -1667,7 +1667,7 @@ static void tui_bump_to_front(char ***order, int *order_count, const char *name)
 	(*order)[0] = bumped;
 }
 
-/* Ask the user to confirm killing the selected session. Returns true if confirmed.*/
+// Ask the user to confirm killing the selected session. Returns true if confirmed.
 static bool tui_confirm_kill(const char *name) {
 	tui_clear_for_lines(2); /* prompt + empty.status line */
 	fputs("\033[1mKill session\033[0m '", stdout);
@@ -1678,9 +1678,9 @@ static bool tui_confirm_kill(const char *name) {
 	return c == 'y' || c == 'Y';
 }
 
-/* Read a line of text from the user. Returns a malloc'd, NUL-terminated string
- * on Enter (which may be empty), or NULL if the user pressed ESC to cancel.
- * The terminal is in raw mode, so characters are echoed manually. */
+// Read a line of text from the user. Returns a malloc'd, NUL-terminated string
+// on Enter (which may be empty), or NULL if the user pressed ESC to cancel.
+// The terminal is in raw mode, so characters are echoed manually.
 static char *tui_read_line(const char *prompt) {
 	tui_clear_for_lines(2); /* prompt + empty.status line */
 	fputs("\033[1m", stdout);
@@ -1741,9 +1741,9 @@ static char *tui_read_line(const char *prompt) {
 	return buf;
 }
 
-/* Prompt the user for a command to run and a session name, then create a new
- * session. Pressing ESC at any prompt cancels and returns to the session list.
- * If a session with the given name already exists, an error is shown. */
+// Prompt the user for a command to run and a session name, then create a new
+// session. Pressing ESC at any prompt cancels and returns to the session list.
+// If a session with the given name already exists, an error is shown.
 static void tui_create_session(struct tui_session *names, int count, int sel, int *top) {
 	const char *msg;
 	char *argv[4];
@@ -1794,11 +1794,11 @@ out:
 	tui_read_byte(800);
 }
 
-/* Prompt for a new name and rename the selected session. Pressing ESC at the
- * prompt cancels and returns to the session list (NULL). On success the
- * malloc'd new session name is returned and its ownership transferred to the
- * caller, so the selection can be kept on the renamed session. If the new name
- * is empty or already in use, NULL is returned. */
+// Prompt for a new name and rename the selected session. Pressing ESC at the
+// prompt cancels and returns to the session list (NULL). On success the
+// malloc'd new session name is returned and its ownership transferred to the
+// caller, so the selection can be kept on the renamed session. If the new name
+// is empty or already in use, NULL is returned.
 static char *tui_rename_session(struct tui_session *names, int count, int sel, int *top) {
 	char *name = names[sel].name;
 	char *newname = tui_read_line("New session name (ESC to cancel): ");
@@ -1818,8 +1818,8 @@ static char *tui_rename_session(struct tui_session *names, int count, int sel, i
 	return NULL;
 }
 
-/* Resolve the index of the session named 'sel' within 'names', or return -1
- * if no session with that name is currently present. */
+// Resolve the index of the session named 'sel' within 'names', or return -1
+// if no session with that name is currently present.
 static int tui_find_index(struct tui_session *names, int count, const char *sel) {
 	if (!sel)
 		return -1;
@@ -1845,12 +1845,12 @@ void tui_main(void) {
 		tui_session_list(&names, &count);
 		if (count < 0)
 			count = 0;
-		/* keep a stable ordering across refreshes */
+		// keep a stable ordering across refreshes
 		tui_apply_order(names, count, &order, &order_count);
 
-		/* Resolve the selection by name. If the previously selected
-		 * session is gone (or none was selected yet), fall back to the
-		 * first session of the freshly built list. */
+		// Resolve the selection by name. If the previously selected
+		// session is gone (or none was selected yet), fall back to the
+		// first session of the freshly built list.
 		sel = tui_find_index(names, count, sel_name);
 		if (sel < 0) {
 			sel = 0;
@@ -1883,11 +1883,11 @@ void tui_main(void) {
 				count = 0;
 				tui_restore_term();
 				attach_session(name, false);
-				/* promote the just-used session to the top of the persistent ordering */
+				// promote the just-used session to the top of the persistent ordering
 				tui_bump_to_front(&order, &order_count, name);
 				free(name);
-				/* the attach call restored the terminal, re-enter
-				 * raw mode to show the menu again */
+				// the attach call restored the terminal, re-enter
+				// raw mode to show the menu again
 				tui_enter_raw();
 			}
 		} else if (k == KEY_ATTACH_RO) {
@@ -1896,15 +1896,15 @@ void tui_main(void) {
 				session_list_free(names, count);
 				names = NULL;
 				count = 0;
-				/* keep sel_name so the very same session is
-				 * re-selected once we return (if it still exists) */
+				// keep sel_name so the very same session is
+				// re-selected once we return (if it still exists)
 				tui_restore_term();
 				client.flags |= CLIENT_READONLY;
 				attach_session(name, false);
 				client.flags &= ~CLIENT_READONLY;
 				free(name);
-				/* the attach call restored the terminal, re-enter
-				 * raw mode to show the menu again */
+				// the attach call restored the terminal, re-enter
+				// raw mode to show the menu again
 				tui_enter_raw();
 			}
 		} else if (k == KEY_KILL) {
@@ -1920,8 +1920,8 @@ void tui_main(void) {
 					tui_draw(names, count, sel, &top, "Kill aborted.");
 					tui_read_byte(800);
 				}
-				/* keep sel_name: it will not be found after the
-				 * refresh, so the first session gets selected */
+				// keep sel_name: it will not be found after the
+				// refresh, so the first session gets selected
 			}
 		} else if (k == KEY_CREATE) {
 			tui_create_session(names, count, sel, &top);
@@ -2004,13 +2004,13 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	/* collect the session name if trailing args */
+	// collect the session name if trailing args
 	if (optind < argc){
 		strncpy(server.session_name, argv[optind], sizeof(server.session_name));
 		server.session_name[sizeof(server.session_name)-1] = '\0';
   }
 
-	/* if yet more trailing arguments, they must be the command */
+	// if yet more trailing arguments, they must be the command
 	if (optind + 1 < argc)
 		cmd = &argv[optind + 1];
 	else
@@ -2058,7 +2058,7 @@ int main(int argc, char *argv[]) {
 			die("create-session");
 		if (action == 'n')
 			break;
-		/* fall through */
+		// fall through
 	case 'a':
 		if (!attach_session(server.session_name, true))
 			die("attach-session");
