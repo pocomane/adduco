@@ -63,14 +63,14 @@
 #define VERSION "v0.develop"
 #endif
 
-/* default command to execute if non is given and $ABDUCO_CMD is unset */
-#define ABDUCO_CMD "sh"
+/* default command to execute if non is given and $ADDUCO_CMD is unset */
+#define ADDUCO_CMD "sh"
 /* default detach key, can be overriden at run time using -e option */
 static char KEY_DETACH = CTRL('\\');
 /* redraw key to send a SIGWINCH signal to underlying process
  * (set to 0 to disable the redraw key) */
 static char KEY_REDRAW = 0;
-/* Where to place the "abduco" directory storing all session socket files.
+/* Where to place the "adduco" directory storing all session socket files.
  * The first directory to succeed is used. */
 static struct Dir {
 	enum {
@@ -82,7 +82,7 @@ static struct Dir {
 	char *reference;
 } socket_dirs[] = {
 	{ SKIP,         ""},
-	{ COMMON_ENV,   "ABDUCO_SOCKET_DIR"},
+	{ COMMON_ENV,   "ADDUCO_SOCKET_DIR"},
 	{ PERSONAL_ENV, "HOME"},
 	{ COMMON_ENV,   "TMPDIR"},
 	{ PATH,         "/tmp/adduco"},
@@ -821,7 +821,7 @@ static void server_mainloop(void) {
 static void print_help(void) {
 	fprintf(stdout, "%s",
 		"\n"
-		"Abduco - Version "VERSION" \n"
+		"Adduco - Version "VERSION" \n"
 		"- Written by Marc André Tanner <mat at brain-dump.org>.\n"
 		"- Small improvements by Mimmo Mane <github.com/pocomane>\n"
 		"\n"
@@ -869,12 +869,12 @@ static void print_help(void) {
 		"  SIGTERM   Detaches a client.\n"
 		"\n"
 		"Environment:\n"
-		"  ABDUCO_CMD      Command to run if none specified; defaults to `sh`.\n"
-		"  ABDUCO_SESSION  Current session name visible to the command.\n"
-		"  ABDUCO_SOCKET   Absolute path to the session socket.\n"
+		"  ADDUCO_CMD      Command to run if none specified; defaults to `sh`.\n"
+		"  ADDUCO_SESSION  Current session name visible to the command.\n"
+		"  ADDUCO_SOCKET   Absolute path to the session socket.\n"
 		"\n"
 		"Session data is stored in the first available of these directories:\n"
-		"  $ABDUCO_SOCKET_DIR/adduco\n"
+		"  $ADDUCO_SOCKET_DIR/adduco\n"
 		"  $HOME/.adduco\n"
 		"  $TMPDIR/adduco/$USER\n"
 		"  /tmp/adduco/$USER\n"
@@ -884,22 +884,22 @@ static void print_help(void) {
 		"Examples:\n"
 		"\n"
 		"# Start a new session (runs `sh` by default)\n"
-		"abduco -c my-session\n"
+		"adduco -c my-session\n"
 		"\n"
 		"# Detach with Ctrl+\\, then reattach later\n"
-		"abduco -a my-session\n"
+		"adduco -a my-session\n"
 		"\n"
 		"# Start a session with a specific command\n"
-		"abduco -c my-session /bin/sh\n"
+		"adduco -c my-session /bin/sh\n"
 		"\n"
 		"# Use Ctrl+Z as detach key\n"
-		"abduco -e ^z -a my-session\n"
+		"adduco -e ^z -a my-session\n"
 		"\n"
 		"# Send a command to a session\n"
-		"echo make | abduco -a my-session\n"
+		"echo make | adduco -a my-session\n"
 		"\n"
 		"# Interactive input\n"
-		"abduco -p my-session\n"
+		"adduco -p my-session\n"
 		"make\n"
 		"^D\n"
 		"\n"
@@ -1044,7 +1044,7 @@ static bool create_socket_dir(char *path, int path_max_len) {
 			continue;
 		}
 
-		if (!xsnprintf(sockaddr->sun_path+dirlen, maxlen-dirlen, ".abduco-%d", getpid()))
+		if (!xsnprintf(sockaddr->sun_path+dirlen, maxlen-dirlen, ".adduco-%d", getpid()))
 			continue;
 
 		socklen_t socklen = offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr->sun_path) + 1;
@@ -1096,8 +1096,8 @@ static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 		strncpy(buf, sockaddr->sun_path, sizeof buf);
 		session_name = basename(buf);
 	}
-	setenv("ABDUCO_SESSION", session_name, 1);
-	setenv("ABDUCO_SOCKET", sockaddr->sun_path, 1);
+	setenv("ADDUCO_SESSION", session_name, 1);
+	setenv("ADDUCO_SOCKET", sockaddr->sun_path, 1);
 
 	return true;
 }
@@ -1948,9 +1948,9 @@ int main(int argc, char *argv[]) {
 	char **cmd = NULL, action = 'i'; /* interactive mode by default */
 	const char *rename_target = NULL;
 
-	char *default_cmd[4] = { "/bin/sh", "-c", getenv("ABDUCO_CMD"), NULL };
+	char *default_cmd[4] = { "/bin/sh", "-c", getenv("ADDUCO_CMD"), NULL };
 	if (!default_cmd[2]) {
-		default_cmd[0] = ABDUCO_CMD;
+		default_cmd[0] = ADDUCO_CMD;
 		default_cmd[1] = NULL;
 	}
 

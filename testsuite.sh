@@ -2,7 +2,7 @@
 
 APPPATH="./build/adduco"
 # set detach key explicitly in case it was changed in config.h
-ABDUCO_OPTS="-e ^\\"
+CLI_OPTS="-e ^\\"
 
 [ ! -z "$1" ] && APPPATH="$1"
 [ ! -x "$APPPATH" ] && echo "usage: $0 /path/to/app" && exit 1
@@ -17,27 +17,27 @@ detach() {
 	printf ""
 }
 
-expected_abduco_prolog() {
+expected_prolog() {
 	printf "[?1049h[H"
 }
 
 # $1 => session-name, $2 => exit status
-expected_abduco_epilog() {
+expected_epilog() {
 	echo "[?25h[?1049l$APPNAME: $1: session terminated with exit status $2"
 }
 
 # $1 => session-name, $2 => cmd to run
-expected_abduco_attached_output() {
-	expected_abduco_prolog
+expected_attached_output() {
+	expected_prolog
 	$2
-	expected_abduco_epilog "$1" $?
+	expected_epilog "$1" $?
 }
 
 # $1 => session-name, $2 => cmd to run
-expected_abduco_detached_output() {
-	expected_abduco_prolog
+expected_detached_output() {
+	expected_prolog
 	$2 >/dev/null 2>&1
-	expected_abduco_epilog "$1" $?
+	expected_epilog "$1" $?
 }
 
 check_environment() {
@@ -63,7 +63,7 @@ run_test_attached() {
 
 	TESTS_RUN=$((TESTS_RUN + 1))
 	echo -n "Running test attached: $name "
-	expected_abduco_attached_output "$name" "$cmd" > "$output_expected" 2>&1
+	expected_attached_output "$name" "$cmd" > "$output_expected" 2>&1
 
 	if $APPPATH -c "$name" $cmd 2>&1 | sed 's/.$//' > "$output" && sleep 1 &&
 	   diff -u "$output_expected" "$output" && check_environment; then
@@ -88,7 +88,7 @@ run_test_detached() {
 
 	TESTS_RUN=$((TESTS_RUN + 1))
 	echo -n "Running test detached: $name "
-	expected_abduco_detached_output "$name" "$cmd" > "$output_expected" 2>&1
+	expected_detached_output "$name" "$cmd" > "$output_expected" 2>&1
 
 	if $APPPATH -n "$name" $cmd >/dev/null 2>&1 && sleep 1 &&
 	   $APPPATH -a "$name" 2>&1 | sed 's/.$//' > "$output" &&
@@ -115,9 +115,9 @@ run_test_attached_detached() {
 	TESTS_RUN=$((TESTS_RUN + 1))
 	echo -n "Running test: $name "
 	$cmd >/dev/null 2>&1
-	expected_abduco_epilog "$name" $? > "$output_expected" 2>&1
+	expected_epilog "$name" $? > "$output_expected" 2>&1
 
-	if detach | $APPPATH $ABDUCO_OPTS -c "$name" $cmd >/dev/null 2>&1 && sleep 3 &&
+	if detach | $APPPATH $CLI_OPTS -c "$name" $cmd >/dev/null 2>&1 && sleep 3 &&
 	   $APPPATH -a "$name" 2>&1 | tail -1 | sed 's/.$//' > "$output" &&
 	   diff -u "$output_expected" "$output" && check_environment; then
 		rm "$output" "$output_expected"
