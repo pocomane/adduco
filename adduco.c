@@ -1581,6 +1581,83 @@ static void tui_session_list(struct tui_session **names, int *count) {
 	*names = list;
 }
 
+/* Keep a stable ordering of sessions across refreshes. */
+static void tui_apply_order(struct tui_session *names, int count,
+                            char ***order, int *order_count) {
+	/* No sessions left: forget the saved ordering entirely. */
+	if (count <= 0) {
+		for (int i = 0; i < *order_count; i++)
+			free((*order)[i]);
+		free(*order);
+		*order = NULL;
+		*order_count = 0;
+		return;
+	}
+
+	int *placed = calloc(count, sizeof(int));   /* 1 once names[i] is placed */
+	int *pos    = calloc(count, sizeof(int));   /* new index for names[i]    */
+	char **new_order = NULL;
+	int new_count = 0;
+
+	/* Pass 1: keep the relative order of known sessions still present. */
+	for (int o = 0; o < *order_count; o++) {
+		for (int i = 0; i < count; i++) {
+			if (!placed[i] && strcmp(names[i].name, (*order)[o]) == 0) {
+				pos[i] = new_count++;
+				placed[i] = 1;
+				new_order = realloc(new_order, new_count * sizeof(char *));
+				new_order[new_count - 1] = strdup((*order)[o]);
+				break;
+			}
+		}
+	}
+	/* Pass 2: append sessions never seen before, at the end. */
+	for (int i = 0; i < count; i++) {
+		if (!placed[i]) {
+			pos[i] = new_count++;
+			placed[i] = 1;
+			new_order = realloc(new_order, new_count * sizeof(char *));
+			new_order[new_count - 1] = strdup(names[i].name);
+		}
+	}
+
+	/* Physically reorder the names array (move the struct values). */
+	struct tui_session *tmp = calloc(count, sizeof(struct tui_session));
+	for (int i = 0; i < count; i++)
+		tmp[pos[i]] = names[i];
+	memcpy(names, tmp, count * sizeof(struct tui_session));
+	free(tmp);
+
+	/* Replace the persistent ordering with the new one. */
+	for (int o = 0; o < *order_count; o++)
+		free((*order)[o]);
+	free(*order);
+	*order = new_order;
+	*order_count = new_count;
+
+	free(placed);
+	free(pos);
+}
+
+/* Move a session to the front of the persistent session ordering.*/
+static void tui_bump_to_front(char ***order, int *order_count, const char *name) {
+	if (!name || !order || !order_count || *order_count <= 1)
+		return;
+	int idx = -1;
+	for (int i = 0; i < *order_count; i++) {
+		if (strcmp((*order)[i], name) == 0) {
+			idx = i;
+			break;
+		}
+	}
+	if (idx <= 0)              /* not found or already at the front */
+		return;
+	char *bumped = (*order)[idx];
+	for (int i = idx; i > 0; i--)
+		(*order)[i] = (*order)[i - 1];
+	(*order)[0] = bumped;
+}
+
 /* Ask the user to confirm killing the selected session. Returns true if confirmed.*/
 static bool tui_confirm_kill(const char *name) {
 	tui_clear_for_lines(2); /* prompt + empty.status line */
@@ -1749,6 +1826,8 @@ void tui_main(void) {
 	char *sel_name = NULL;   /* canonical selection: name of the chosen session */
 	int sel;                 /* derived index into names[], resolved each refresh */
 	int top = 0;
+	char **order = NULL;       /* persistent session ordering */
+	int order_count = 0;
 
 	tui_enter_raw();
 	atexit(tui_restore_term);
@@ -1757,6 +1836,8 @@ void tui_main(void) {
 		tui_session_list(&names, &count);
 		if (count < 0)
 			count = 0;
+		/* keep a stable ordering across refreshes */
+		tui_apply_order(names, count, &order, &order_count);
 
 		/* Resolve the selection by name. If the previously selected
 		 * session is gone (or none was selected yet), fall back to the
@@ -1791,10 +1872,10 @@ void tui_main(void) {
 				session_list_free(names, count);
 				names = NULL;
 				count = 0;
-				/* keep sel_name so the very same session is
-				 * re-selected once we return (if it still exists) */
 				tui_restore_term();
 				attach_session(name, false);
+				/* promote the just-used session to the top of the persistent ordering */
+				tui_bump_to_front(&order, &order_count, name);
 				free(name);
 				/* the attach call restored the terminal, re-enter
 				 * raw mode to show the menu again */
@@ -1849,6 +1930,9 @@ void tui_main(void) {
 	tui_restore_term();
 	session_list_free(names, count);
 	free(sel_name);
+	for (int i = 0; i < order_count; i++)
+		free(order[i]);
+	free(order);
 }
 
 // --------------------------------------------------------------------------------
