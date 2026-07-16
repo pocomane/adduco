@@ -33,8 +33,7 @@ also non-intercative flags are supported.
 In order to create a new session `adduco` requires a session name
 as well as an command which will be run. If no command is given
 the environment variable `$ADDUCO_CMD` is examined and if not set
-`dvtm` is executed. Therefore assuming `dvtm` is located somewhere
-in `$PATH` a new session named *demo* is created with:
+`sh` is executed. Therefore a new session named *demo* is created with:
 
     $ adduco -c demo
 
