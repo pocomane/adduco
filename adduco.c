@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2013-2018 Marc André Tanner <mat at brain-dump.org>
+ * Copyright (c) 2013-2018 Marc André Tanner <mat at brain-dump.org>,
+ * 2026 Mimmo Mane <github/pocomane>.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -99,6 +100,10 @@ static struct Dir {
 
 #define countof(arr) (sizeof(arr) / sizeof((arr)[0]))
 
+struct {
+  bool has_term, quiet, passthrough;
+} options;
+
 enum PacketType {
 	MSG_CONTENT = 0,
 	MSG_ATTACH  = 1,
@@ -160,7 +165,7 @@ typedef struct {
 static Server server = { .running = true, .exit_status = -1, .host = "@localhost" };
 static Client client;
 static struct termios orig_term, cur_term;
-static bool has_term, alternate_buffer, quiet, passthrough;
+static bool alternate_buffer;
 
 static struct sockaddr_un sockaddr = {
 	.sun_family = AF_UNIX,
@@ -239,7 +244,7 @@ static void info(enum InfoType type, const char *str, ...) {
 		return;
 	}
 #endif
-	if (str && !quiet) {
+	if (str && !options.quiet) {
 		fprintf(stderr, "%s: %s: ", server.name, server.session_name);
 		vfprintf(stderr, str, ap);
 		if (liberr)
@@ -354,7 +359,7 @@ static bool client_recv_packet(Packet *pkt) {
 }
 
 static void client_restore_terminal(void) {
-	if (!has_term)
+	if (!options.has_term)
 		return;
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
 	if (alternate_buffer) {
@@ -365,7 +370,7 @@ static void client_restore_terminal(void) {
 }
 
 static void client_setup_terminal(void) {
-	if (!has_term)
+	if (!options.has_term)
 		return;
 	atexit(client_restore_terminal);
 
@@ -432,7 +437,7 @@ static int client_mainloop(void) {
 			if (client_recv_packet(&pkt)) {
 				switch (pkt.type) {
 				case MSG_CONTENT:
-					if (!passthrough)
+					if (!options.passthrough)
 						write_all(STDOUT_FILENO, pkt.u.msg, pkt.len);
 					break;
 				case MSG_RESIZE:
@@ -1143,7 +1148,7 @@ static bool create_session(const char *name, char * const argv[]) {
 			sigemptyset(&sa.sa_mask);
 			sa.sa_handler = server_pty_died_handler;
 			sigaction(SIGCHLD, &sa, NULL);
-			switch (server.pid = forkpty(&server.pty, NULL, has_term ? &server.term : NULL, &server.winsize)) {
+			switch (server.pid = forkpty(&server.pty, NULL, options.has_term ? &server.term : NULL, &server.winsize)) {
 			case 0: /* child = user application process */
 				close(server.socket);
 				close(server_pipe[0]);
@@ -1983,10 +1988,10 @@ int main(int argc, char *argv[]) {
 			force = true;
 			break;
 		case 'p':
-			passthrough = true;
+			options.passthrough = true;
 			break;
 		case 'q':
-			quiet = true;
+			options.quiet = true;
 			break;
 		case 'r':
 			client.flags |= CLIENT_READONLY;
@@ -2012,22 +2017,22 @@ int main(int argc, char *argv[]) {
 		cmd = default_cmd;
 
 	if (server.session_name[0] != '\0' && !isatty(STDIN_FILENO) && action != 'i')
-		passthrough = true;
+		options.passthrough = true;
 
-	if (passthrough && action == 'i')
+	if (options.passthrough && action == 'i')
 		wrong_usage();
 
-	if (passthrough) {
-			quiet = true;
+	if (options.passthrough) {
+			options.quiet = true;
 			client.flags |= CLIENT_LOWPRIORITY;
 	}
 
 	if (action != 'i' && action != 's' && action != 'h' && server.session_name[0] == '\0')
 		wrong_usage();
 
-	if (!passthrough && tcgetattr(STDIN_FILENO, &orig_term) != -1) {
+	if (!options.passthrough && tcgetattr(STDIN_FILENO, &orig_term) != -1) {
 		server.term = orig_term;
-		has_term = true;
+		options.has_term = true;
 	}
 
 	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &server.winsize) == -1) {
@@ -2071,13 +2076,13 @@ int main(int argc, char *argv[]) {
 	case 'k':
 		if (signal_to_session(SIGTERM, server.session_name))
 			die("kill-session: kill");
-		if (!quiet)
+		if (!options.quiet)
 			info(INFO, "session killed");
 		break;
 	case 'm':
 		if (!rename_session(server.session_name, rename_target)) {
 			die("can not rename session");
-		} else if (!quiet) {
+		} else if (!options.quiet) {
 			info(INFO, "session renamed to %s", rename_target);
 		}
 		break;

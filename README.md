@@ -10,8 +10,10 @@ Refer to the [github tools](https://github.com/pocomane/adduco) for comments,
 suggestions, ideas, to a bug report, a patch or something else related to
 adduco.
 
-This software is a fork of [abduco](https://github.com/martanne/abduco) than
-mainly adds an interactive mode, plus some other small changes.
+This software is a fork of [abduco](https://github.com/martanne/abduco) that
+mainly adds an interactive mode, plus some other small changes. Currently, the
+interface is a proof of concept and was mostly written by AI: I am planning
+to rewrite it once it has stabilized.
 
 ## Download
 
