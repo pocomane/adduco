@@ -63,15 +63,6 @@ creation.
 
     $ adduco -a demo
 
-If you encounter problems with incomplete redraws or other
-incompatibilities it is recommended to run your applications
-within [dvtm](https://github.com/martanne/dvtm) under adduco:
-
-    $ adduco -c demo dvtm your-application
-
-Check out the manual page for further information and all available
-command line options.
-
 ## Other features
 
  * the **session exit status** of the command being run is always kept and
