@@ -737,7 +737,14 @@ static void server_mainloop(void) {
 						ws.ws_col = client_packet.u.ws.cols;
 						ioctl(server.pty, TIOCSWINSZ, &ws);
 					}
-					kill(-server.pid, SIGWINCH);
+					pid_t fg = tcgetpgrp(server.pty);
+					if (fg > 0)
+						/* Send SIGWINCH to the foreground process group of the pty. This
+						 * is needed when the supervised (e.g. sh) launched an
+						 * interactive program (e.g. vim) */
+						kill(-fg, SIGWINCH);
+					else
+						kill(-server.pid, SIGWINCH);
 					break;
 				case MSG_EXIT:
 					exit_packet_delivered = true;
