@@ -1744,7 +1744,7 @@ static char *tui_read_line(const char *prompt) {
 // Prompt the user for a command to run and a session name, then create a new
 // session. Pressing ESC at any prompt cancels and returns to the session list.
 // If a session with the given name already exists, an error is shown.
-static void tui_create_session(struct tui_session *names, int count, int sel, int *top) {
+static const char *tui_create_session(void) {
 	const char *msg;
 	char *argv[4];
 	char *cmd = tui_read_line("Command to run (ESC to cancel): ");
@@ -1790,8 +1790,7 @@ static void tui_create_session(struct tui_session *names, int count, int sel, in
 	free(name);
 
 out:
-	tui_draw(names, count, sel, top, msg);
-	tui_read_byte(800);
+	return msg;
 }
 
 // Prompt for a new name and rename the selected session. Pressing ESC at the
@@ -1837,6 +1836,7 @@ void tui_main(void) {
 	int top = 0;
 	char **order = NULL;       /* persistent session ordering */
 	int order_count = 0;
+	const char *msg = NULL;
 
 	tui_enter_raw();
 	atexit(tui_restore_term);
@@ -1858,7 +1858,8 @@ void tui_main(void) {
 			sel_name = count > 0 ? strdup(names[0].name) : NULL;
 		}
 
-		tui_draw(names, count, sel, &top, NULL);
+		tui_draw(names, count, sel, &top, msg);
+		msg = NULL;
 
 		int k = tui_read_key();
 		if (k == KEY_QUIT) {
@@ -1912,19 +1913,17 @@ void tui_main(void) {
 				const char *name = names[sel].name;
 				if (tui_confirm_kill(name)) {
 					if (signal_to_session(SIGTERM, name))
-						tui_draw(names, count, sel, &top, "Could not kill session.");
+						msg = "Could not kill session.";
 					else
-						tui_draw(names, count, sel, &top, "Session killed.");
-					tui_read_byte(800);
+						msg = "Session killed.";
 				} else {
-					tui_draw(names, count, sel, &top, "Kill aborted.");
-					tui_read_byte(800);
+					msg = "Kill aborted.";
 				}
 				// keep sel_name: it will not be found after the
 				// refresh, so the first session gets selected
 			}
 		} else if (k == KEY_CREATE) {
-			tui_create_session(names, count, sel, &top);
+			msg = tui_create_session();
 		} else if (k == KEY_RENAME) {
 			if (count > 0 && sel < count) {
 				char *newname = tui_rename_session(names, count, sel, &top);
