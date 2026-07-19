@@ -1650,7 +1650,7 @@ static void tui_apply_order(struct tui_session *names, int count,
 
 // Move a session to the front of the persistent session ordering.
 static void tui_bump_to_front(char ***order, int *order_count, const char *name) {
-	if (!name || !order || !order_count || *order_count <= 1)
+	if (!name || !order || !order_count)
 		return;
 	int idx = -1;
 	for (int i = 0; i < *order_count; i++) {
@@ -1659,12 +1659,42 @@ static void tui_bump_to_front(char ***order, int *order_count, const char *name)
 			break;
 		}
 	}
-	if (idx <= 0)              /* not found or already at the front */
+	if (idx == 0)             /* already at the front */
 		return;
-	char *bumped = (*order)[idx];
-	for (int i = idx; i > 0; i--)
-		(*order)[i] = (*order)[i - 1];
-	(*order)[0] = bumped;
+	if (idx > 0) {            /* known session: shift it to the front */
+		char *bumped = (*order)[idx];
+		for (int i = idx; i > 0; i--)
+			(*order)[i] = (*order)[i - 1];
+		(*order)[0] = bumped;
+		return;
+	}
+	/* unknown session: prepend a brand new entry at the front */
+	char **new_order = realloc(*order, (*order_count + 1) * sizeof(char *));
+	if (!new_order)
+		return;
+	for (int i = *order_count; i > 0; i--)
+		new_order[i] = new_order[i - 1];
+	new_order[0] = strdup(name);
+	if (!new_order[0]) {     /* strdup failed: keep the old ordering */
+		free(new_order);
+		return;
+	}
+	*order = new_order;
+	(*order_count)++;
+}
+
+// Suspend the interactive session list, attach to the named session
+static void tui_attach_session(const char *name, bool readonly,
+				char ***order, int *order_count) {
+	tui_restore_term();
+	if (readonly)
+		client.flags |= CLIENT_READONLY;
+	attach_session(name, false);
+	if (readonly)
+		client.flags &= ~CLIENT_READONLY;
+	if (!readonly)
+		tui_bump_to_front(order, order_count, name);
+	tui_enter_raw();
 }
 
 // Ask the user to confirm killing the selected session. Returns true if confirmed.
@@ -1742,55 +1772,54 @@ static char *tui_read_line(const char *prompt) {
 }
 
 // Prompt the user for a command to run and a session name, then create a new
-// session. Pressing ESC at any prompt cancels and returns to the session list.
-// If a session with the given name already exists, an error is shown.
-static const char *tui_create_session(void) {
-	const char *msg;
+// session.
+static char *tui_create_session(const char **msg) {
 	char *argv[4];
 	char *cmd = tui_read_line("Command to run (ESC to cancel): ");
 	if (!cmd) {
-		msg = "Create cancelled.";
-		goto out;
+		*msg = "Create cancelled.";
+		return NULL;
 	}
 	if (cmd[0] == '\0') {
 		free(cmd);
-		msg = "Empty command, create aborted.";
-		goto out;
+		*msg = "Empty command, create aborted.";
+		return NULL;
 	}
 
 	char *name = tui_read_line("Session name (ESC to cancel): ");
 	if (!name) {
 		free(cmd);
-		msg = "Create cancelled.";
-		goto out;
+		*msg = "Create cancelled.";
+		return NULL;
 	}
 	if (name[0] == '\0') {
 		free(cmd);
 		free(name);
-		msg = "Empty name, create aborted.";
-		goto out;
+		*msg = "Empty name, create aborted.";
+		return NULL;
 	}
 
 	if (session_exists(name)) {
 		free(cmd);
 		free(name);
-		msg = "Session already exists.";
-		goto out;
+		*msg = "Session already exists.";
+		return NULL;
 	}
 
 	argv[0] = "/bin/sh";
 	argv[1] = "-c";
 	argv[2] = cmd;
 	argv[3] = NULL;
-	if (create_session(name, argv))
-		msg = "Session created.";
-	else
-		msg = "Could not create session.";
+	if (!create_session(name, argv)) {
+		free(cmd);
+		free(name);
+		*msg = "Could not create session.";
+		return NULL;
+	}
 	free(cmd);
-	free(name);
 
-out:
-	return msg;
+	// ownership of the session name is transferred to the caller
+	return name;
 }
 
 // Prompt for a new name and rename the selected session. Pressing ESC at the
@@ -1882,14 +1911,8 @@ void tui_main(void) {
 				session_list_free(names, count);
 				names = NULL;
 				count = 0;
-				tui_restore_term();
-				attach_session(name, false);
-				// promote the just-used session to the top of the persistent ordering
-				tui_bump_to_front(&order, &order_count, name);
+				tui_attach_session(name, false, &order, &order_count);
 				free(name);
-				// the attach call restored the terminal, re-enter
-				// raw mode to show the menu again
-				tui_enter_raw();
 			}
 		} else if (k == KEY_ATTACH_RO) {
 			if (count > 0 && sel < count) {
@@ -1897,16 +1920,8 @@ void tui_main(void) {
 				session_list_free(names, count);
 				names = NULL;
 				count = 0;
-				// keep sel_name so the very same session is
-				// re-selected once we return (if it still exists)
-				tui_restore_term();
-				client.flags |= CLIENT_READONLY;
-				attach_session(name, false);
-				client.flags &= ~CLIENT_READONLY;
+				tui_attach_session(name, true, &order, &order_count);
 				free(name);
-				// the attach call restored the terminal, re-enter
-				// raw mode to show the menu again
-				tui_enter_raw();
 			}
 		} else if (k == KEY_KILL) {
 			if (count > 0 && sel < count) {
@@ -1923,7 +1938,16 @@ void tui_main(void) {
 				// refresh, so the first session gets selected
 			}
 		} else if (k == KEY_CREATE) {
-			msg = tui_create_session();
+			char *created = tui_create_session(&msg);
+			if (created) {
+				session_list_free(names, count);
+				names = NULL;
+				count = 0;
+				free(sel_name);
+				sel_name = strdup(created);
+				tui_attach_session(created, false, &order, &order_count);
+				free(created);
+			}
 		} else if (k == KEY_RENAME) {
 			if (count > 0 && sel < count) {
 				char *newname = tui_rename_session(names, count, sel, &top);
@@ -2099,3 +2123,5 @@ int main(int argc, char *argv[]) {
 
 	return 0;
 }
+
+
