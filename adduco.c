@@ -173,9 +173,6 @@ static Client client;
 static struct termios orig_term, cur_term;
 static bool alternate_buffer;
 
-static struct sockaddr_un sockaddr = {
-	.sun_family = AF_UNIX,
-};
 
 static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name);
 
@@ -522,7 +519,10 @@ static void server_sink_client() {
 }
 
 static void server_mark_socket_exec(bool exec, bool usr) {
+	struct sockaddr_un sockaddr = {0};
 	struct stat sb;
+	if (!set_socket_name(&sockaddr, server.session_name))
+		return;
 	if (stat(sockaddr.sun_path, &sb) == -1)
 		return;
 	mode_t mode = sb.st_mode;
@@ -535,9 +535,10 @@ static void server_mark_socket_exec(bool exec, bool usr) {
 }
 
 static int server_create_socket(const char *name) {
+	struct sockaddr_un sockaddr = {0};
 	if (!set_socket_name(&sockaddr, name))
 		return -1;
-	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	int fd = socket(sockaddr.sun_family, SOCK_STREAM, 0);
 	if (fd == -1)
 		return -1;
 	socklen_t socklen = offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1;
@@ -666,10 +667,13 @@ static void server_sigusr1_handler(int sig) {
 }
 
 static bool server_rename_session(const char *newname) {
-	char oldpath[sizeof(sockaddr.sun_path)];
-	strncpy(oldpath, sockaddr.sun_path, sizeof(oldpath) - 1);
+	struct sockaddr_un old_sock = {0};
+	char oldpath[sizeof(old_sock.sun_path)];
+	if (!set_socket_name(&old_sock, server.session_name))
+		return false;
+	strncpy(oldpath, old_sock.sun_path, sizeof(oldpath) - 1);
 	oldpath[sizeof(oldpath) - 1] = (char)0;
-	
+
 	// create the new communication socket at the new path
 	int newfd = server_create_socket(newname);
 	if (newfd == -1)
@@ -687,6 +691,9 @@ static bool server_rename_session(const char *newname) {
 }
 
 static void server_atexit_handler(void) {
+	struct sockaddr_un sockaddr = {0};
+	if (!set_socket_name(&sockaddr, server.session_name))
+		return;
 	unlink(sockaddr.sun_path);
 }
 
@@ -940,9 +947,10 @@ static bool xsnprintf(char *buf, size_t size, const char *fmt, ...) {
 }
 
 static int session_connect(const char *name) {
+	struct sockaddr_un sockaddr = {0};
 	int fd;
 	struct stat sb;
-	if (!set_socket_name(&sockaddr, name) || (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+	if (!set_socket_name(&sockaddr, name) || (fd = socket(sockaddr.sun_family, SOCK_STREAM, 0)) == -1)
 		return -1;
 	socklen_t socklen = offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1;
 	if (connect(fd, (struct sockaddr*)&sockaddr, socklen) == -1) {
@@ -974,24 +982,26 @@ static pid_t session_exists(const char *name) {
 }
 
 static bool session_alive(const char *name) {
+	struct sockaddr_un sockaddr = {0};
 	struct stat sb;
+	if (!set_socket_name(&sockaddr, name))
+		return false;
 	return session_exists(name) &&
 	       stat(sockaddr.sun_path, &sb) == 0 &&
 	       S_ISSOCK(sb.st_mode) && (sb.st_mode & S_IXGRP) == 0;
 }
 
-static bool create_socket_dir(char *path, int path_max_len) {
-	struct sockaddr_un s = {
-		.sun_family = AF_UNIX,
-	};
-	static char cache[sizeof(s.sun_path)] = {0};
+static bool create_socket_dir(struct sockaddr_un *sockaddr) {
+	char *path = sockaddr->sun_path;
+	int path_max_len = sizeof(sockaddr->sun_path);
+	sockaddr->sun_family = AF_UNIX;
+	static char cache[sizeof(sockaddr->sun_path)] = {0};
 	if (cache[0]){
 		strncpy(path, cache, path_max_len);
 		return true;
 	}
 
-	struct sockaddr_un *sockaddr = &s;
-	int socketfd = socket(AF_UNIX, SOCK_STREAM, 0);
+	int socketfd = socket(sockaddr->sun_family, SOCK_STREAM, 0);
 	if (socketfd == -1)
 		return false;
 
@@ -1093,7 +1103,7 @@ static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 		if (!xsnprintf(sockaddr->sun_path, maxlen, "%s/%s", cwd, name))
 			return false;
 	} else {
-		if (!create_socket_dir(sockaddr->sun_path, sizeof(sockaddr->sun_path)))
+		if (!create_socket_dir(sockaddr))
 			return false;
 		if (strlen(sockaddr->sun_path) + strlen(name) + strlen(server.host) >= maxlen) {
 			errno = ENAMETOOLONG;
@@ -1229,6 +1239,8 @@ static bool create_session(const char *name, char * const argv[]) {
 		ssize_t len = read_all(client_pipe[0], errormsg, sizeof(errormsg));
 		if (len > 0) {
 			write_all(STDERR_FILENO, errormsg, len);
+			struct sockaddr_un sockaddr = {0};
+			set_socket_name(&sockaddr, name);
 			unlink(sockaddr.sun_path);
 			exit(EXIT_FAILURE);
 		}
@@ -1331,7 +1343,8 @@ static int iterate_over_sessions(struct session_iterator *result) {
 	if (!result->namelist) {
 		result->count = -1;
 		result->current = -1;
-		if (!create_socket_dir(sockaddr.sun_path, sizeof(sockaddr.sun_path)))
+		struct sockaddr_un sockaddr = {0};
+		if (!create_socket_dir(&sockaddr))
 			return 0;
 		if (chdir(sockaddr.sun_path) == -1)
 			return 0;
@@ -1563,9 +1576,9 @@ static void tui_draw(struct tui_session *names, int count, int sel, int *top, co
 	if (*top < 0)
 		*top = 0;
 
-	char path[256] = {0};
-	create_socket_dir(path, sizeof(path));
-	fprintf(stdout, "\033[0mSession store: %s - ", path);
+	struct sockaddr_un sockaddr = {0};
+	create_socket_dir(&sockaddr);
+	fprintf(stdout, "\033[0mSession store: %s - ", sockaddr.sun_path);
 	if (count == 0)
 		fprintf(stdout, "No active sessions.\r\n - ---\r\n");
 	else {
