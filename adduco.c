@@ -170,7 +170,6 @@ typedef struct {
 
 static Server server = { .running = true, .exit_status = -1, .host = "@localhost" };
 static Client client;
-static struct termios orig_term, cur_term;
 
 static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name);
 
@@ -363,6 +362,46 @@ static bool client_recv_packet(Packet *pkt) {
 	return false;
 }
 
+typedef enum { TERM_ORIG, TERM_RAW_KEEP, TERM_RAW_TRASH } TermMode;
+
+static bool terminal_set_mode(TermMode mode, struct termios *out) {
+	static bool done = false, no_tty = false;
+	static struct termios orig, current;
+	static TermMode active = TERM_ORIG;
+	if (!done) {
+		done = true;
+		if (tcgetattr(STDIN_FILENO, &orig) == -1) no_tty = true;
+		else current = orig;
+	}
+	if (no_tty) return false;
+	if (mode != active) {
+		if (mode == TERM_ORIG) {
+			current = orig;
+			tcsetattr(STDIN_FILENO, TCSAFLUSH, &current);
+		} else {
+			struct termios raw = orig;
+			raw.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL|IXON|IXOFF);
+			raw.c_oflag &= ~(OPOST);
+			raw.c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
+			raw.c_cflag &= ~(CSIZE|PARENB);
+			raw.c_cflag |= CS8;
+			raw.c_cc[VMIN] = 1;
+			raw.c_cc[VTIME] = 0;
+			if (mode == TERM_RAW_KEEP) {
+				raw.c_cc[VLNEXT] = _POSIX_VDISABLE;
+				current = raw;
+				tcsetattr(STDIN_FILENO, TCSANOW, &current);
+			} else {
+				current = raw;
+				tcsetattr(STDIN_FILENO, TCSAFLUSH, &current);
+			}
+		}
+		active = mode;
+	}
+	if (out) *out = current;
+	return true;
+}
+
 static void terminal_alternate_buffer(bool enable) {
 	static bool active = false;
 	if (enable == active) return;
@@ -384,7 +423,7 @@ static void terminal_cursor_show(bool show) {
 static void client_restore_terminal(void) {
 	if (!options.has_term)
 		return;
-	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
+	terminal_set_mode(TERM_ORIG, NULL);
 	terminal_cursor_show(true);
 	terminal_alternate_buffer(false);
 }
@@ -394,16 +433,7 @@ static void client_setup_terminal(void) {
 		return;
 	atexit(client_restore_terminal);
 
-	cur_term = orig_term;
-	cur_term.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL|IXON|IXOFF);
-	cur_term.c_oflag &= ~(OPOST);
-	cur_term.c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
-	cur_term.c_cflag &= ~(CSIZE|PARENB);
-	cur_term.c_cflag |= CS8;
-	cur_term.c_cc[VLNEXT] = _POSIX_VDISABLE;
-	cur_term.c_cc[VMIN] = 1;
-	cur_term.c_cc[VTIME] = 0;
-	tcsetattr(STDIN_FILENO, TCSANOW, &cur_term);
+	terminal_set_mode(TERM_RAW_KEEP, NULL);
 	terminal_alternate_buffer(true);
 }
 
@@ -1503,34 +1533,17 @@ struct tui_session {
 	char *info;
 };
 
-static struct termios orig_term;
-static int raw_active = 0;
-
 // restore the terminal to its original settings (idempotent)
 static void tui_restore_term(void) {
-	if (raw_active) {
-		tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
-		raw_active = 0;
-	}
+	terminal_set_mode(TERM_ORIG, NULL);
 	terminal_cursor_show(true);
 	terminal_alternate_buffer(false);
 }
 
 // switch the terminal into raw mode so we can read single key presses
 static void tui_enter_raw(void) {
-	if (tcgetattr(STDIN_FILENO, &orig_term) == -1)
+	if (!terminal_set_mode(TERM_RAW_TRASH, NULL))
 		return;
-	struct termios t = orig_term;
-	t.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL|IXON|IXOFF);
-	t.c_oflag &= ~(OPOST);
-	t.c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
-	t.c_cflag &= ~(CSIZE|PARENB);
-	t.c_cflag |= CS8;
-	t.c_cc[VMIN]  = 1;
-	t.c_cc[VTIME] = 0;
-	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &t) == -1)
-		return;
-	raw_active = 1;
 	// run the session list in the alternate screen so it does not
 	// pollute the terminal scrollback
 	terminal_alternate_buffer(true);
@@ -2169,10 +2182,8 @@ int main(int argc, char *argv[]) {
 	if (action != 'i' && action != 's' && action != 'h' && server.session_name[0] == '\0')
 		wrong_usage();
 
-	if (!options.passthrough && tcgetattr(STDIN_FILENO, &orig_term) != -1) {
-		server.term = orig_term;
+	if (!options.passthrough && terminal_set_mode(TERM_ORIG, &server.term))
 		options.has_term = true;
-	}
 
 	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &server.winsize) == -1) {
 		server.winsize.ws_col = 80;
