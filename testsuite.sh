@@ -45,7 +45,7 @@ expected_detached_output() {
 
 check_environment() {
 	[ "`$APPPATH -s | wc -l`" -gt 1 ] && echo "$APPNAME" session exists && exit 1;
-	pgrep "$APPNAME" && echo $APPNAME process exists && exit 1;
+	pgrep -x "$APPNAME" && echo $APPNAME process exists && exit 1;
 	return 0;
 }
 

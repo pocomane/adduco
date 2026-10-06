@@ -171,10 +171,9 @@ typedef struct {
 static Server server = { .running = true, .exit_status = -1, .host = "@localhost" };
 static Client client;
 static struct termios orig_term, cur_term;
-static bool alternate_buffer;
-
 
 static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name);
+
 
 // --------------------------------------------------------------------------------
 // Debug
@@ -364,15 +363,30 @@ static bool client_recv_packet(Packet *pkt) {
 	return false;
 }
 
+static void terminal_alternate_buffer(bool enable) {
+	static bool active = false;
+	if (enable == active) return;
+	active = enable;
+	if (enable) fputs("\033[?1049h\033[H", stdout);
+	else fputs("\033[?1049l", stdout);
+	fflush(stdout);
+}
+
+static void terminal_cursor_show(bool show) {
+	static bool visible = false;
+	if (show == visible) return;
+	visible = show;
+	if (show) fputs("\033[?25h", stdout);
+	else fputs("\033[?25l", stdout);
+	fflush(stdout);
+}
+
 static void client_restore_terminal(void) {
 	if (!options.has_term)
 		return;
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
-	if (alternate_buffer) {
-		printf("\033[?25h\033[?1049l");
-		fflush(stdout);
-		alternate_buffer = false;
-	}
+	terminal_cursor_show(true);
+	terminal_alternate_buffer(false);
 }
 
 static void client_setup_terminal(void) {
@@ -390,12 +404,7 @@ static void client_setup_terminal(void) {
 	cur_term.c_cc[VMIN] = 1;
 	cur_term.c_cc[VTIME] = 0;
 	tcsetattr(STDIN_FILENO, TCSANOW, &cur_term);
-
-	if (!alternate_buffer) {
-		printf("\033[?1049h\033[H");
-		fflush(stdout);
-		alternate_buffer = true;
-	}
+	terminal_alternate_buffer(true);
 }
 
 static int client_mainloop(void) {
@@ -1503,9 +1512,8 @@ static void tui_restore_term(void) {
 		tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
 		raw_active = 0;
 	}
-	// make sure the cursor is visible again
-	fputs("\033[?25h", stdout);
-	fflush(stdout);
+	terminal_cursor_show(true);
+	terminal_alternate_buffer(false);
 }
 
 // switch the terminal into raw mode so we can read single key presses
@@ -1523,6 +1531,9 @@ static void tui_enter_raw(void) {
 	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &t) == -1)
 		return;
 	raw_active = 1;
+	// run the session list in the alternate screen so it does not
+	// pollute the terminal scrollback
+	terminal_alternate_buffer(true);
 }
 
 // read a single byte from stdin, waiting at most timeout_ms (or forever if < 0).
