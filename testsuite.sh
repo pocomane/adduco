@@ -19,23 +19,26 @@ detach() {
 
 expected_prolog() {
 	printf "[?1049h[H"
+	echo
+	echo "$APPNAME: $1 - attached"
+	echo
 }
 
 # $1 => session-name, $2 => exit status
 expected_epilog() {
-	echo "[?25h[?1049l$APPNAME: $1: session terminated with exit status $2"
+	echo "[?25h[?1049l$APPNAME: $1 - session terminated with exit status $2"
 }
 
 # $1 => session-name, $2 => cmd to run
 expected_attached_output() {
-	expected_prolog
+	expected_prolog "$1"
 	$2
 	expected_epilog "$1" $?
 }
 
 # $1 => session-name, $2 => cmd to run
 expected_detached_output() {
-	expected_prolog
+	expected_prolog "$1"
 	$2 >/dev/null 2>&1
 	expected_epilog "$1" $?
 }

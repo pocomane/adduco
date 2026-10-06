@@ -226,6 +226,7 @@ enum InfoType {
 	ERROR = 1,
 	ERROR_LIB,
 	INFO,
+	INFOLINE,
 	DEBUG,
 	DEBUG_PACKET,
 };
@@ -248,11 +249,13 @@ static void info(enum InfoType type, const char *str, ...) {
 	}
 #endif
 	if (str && !options.quiet) {
-		fprintf(stderr, "%s: %s: ", server.name, server.session_name);
+		if (type == INFOLINE) fprintf(stderr, "\r\n");
+		fprintf(stderr, "%s: %s - ", server.name, server.session_name);
 		vfprintf(stderr, str, ap);
 		if (liberr)
 			fprintf(stderr, " - %s", liberr);
 		fprintf(stderr, "\r\n");
+		if (type == INFOLINE) fprintf(stderr, "\r\n");
 		fflush(stderr);
 	}
 	va_end(ap);
@@ -1150,6 +1153,9 @@ static bool create_session(const char *name, char * const argv[]) {
 	char errormsg[255];
 	struct sigaction sa;
 
+	strncpy(server.session_name, name, sizeof(server.session_name));
+	server.session_name[sizeof(server.session_name)-1] = '\0';
+
 	if (session_exists(name)) {
 		errno = EADDRINUSE;
 		return false;
@@ -1261,6 +1267,8 @@ static bool create_session(const char *name, char * const argv[]) {
 }
 
 static bool attach_session(const char *name, const bool terminate) {
+	strncpy(server.session_name, name, sizeof(server.session_name));
+	server.session_name[sizeof(server.session_name)-1] = '\0';
 	if (server.socket > 0)
 		close(server.socket);
 	if ((server.socket = session_connect(name)) == -1)
@@ -1277,10 +1285,11 @@ static bool attach_session(const char *name, const bool terminate) {
 	sigaction(SIGPIPE, &sa, NULL);
 
 	client_setup_terminal();
+	info(INFOLINE, "attached");
 	int status = client_mainloop();
 	client_restore_terminal();
 	if (status == -1) {
-		info(INFO, "detached");
+		info(INFOLINE, "detached");
 	} else if (status == -EIO) {
 		info(INFO, "exited due to I/O errors");
 	} else {
