@@ -1330,13 +1330,26 @@ static int session_filter(const struct dirent *d) {
 	return strstr(d->d_name, server.host) != NULL;
 }
 
-static int session_comparator(const struct dirent **a, const struct dirent **b) {
-	struct stat sa, sb;
-	if (stat((*a)->d_name, &sa) != 0)
-		return -1;
-	if (stat((*b)->d_name, &sb) != 0)
-		return 1;
-	return sa.st_atime < sb.st_atime ? -1 : 1;
+static void session_sort_by_atime(const char *dir, size_t dirlen, struct dirent **list, int count) {
+	time_t atime[count];
+	char full[dirlen + 256];
+	for (int i = 0; i < count; i++) {
+		struct stat sb;
+		snprintf(full, sizeof full, "%s/%s", dir, list[i]->d_name);
+		atime[i] = (stat(full, &sb) == 0) ? sb.st_atime : 0;
+	}
+	for (int i = 1; i < count; i++) {
+		struct dirent *tmp = list[i];
+		time_t ta = atime[i];
+		int j = i - 1;
+		while (j >= 0 && atime[j] > ta) {
+			list[j + 1] = list[j];
+			atime[j + 1] = atime[j];
+			j--;
+		}
+		list[j + 1] = tmp;
+		atime[j + 1] = ta;
+	}
 }
 
 struct session_iterator {
@@ -1351,15 +1364,16 @@ struct session_iterator {
 // continue to iterate over sessions, stop when it returns false
 static int iterate_over_sessions(struct session_iterator *result) {
 	result->info = 'E'; /* iteration error */
+	size_t dirlen;
+	const char *dir = create_and_get_socket_dir(&dirlen);
+	if (!dir)
+		return 0;
 	if (!result->namelist) {
 		result->count = -1;
 		result->current = -1;
-		const char *dir = create_and_get_socket_dir(NULL);
-		if (!dir)
-			return 0;
-		if (chdir(dir) == -1)
-			return 0;
-		result->count = scandir(dir, &result->namelist, session_filter, session_comparator);
+		result->count = scandir(dir, &result->namelist, session_filter, NULL);
+		if (result->count > 0)
+			session_sort_by_atime(dir, dirlen, result->namelist, result->count);
 		if (result->count < 0)
 			return 0;
 	}
@@ -1367,7 +1381,9 @@ static int iterate_over_sessions(struct session_iterator *result) {
 	result->current += 1;
 	if (result->count > 0 && result->current < result->count) {
 		struct dirent *item = result->namelist[result->current];
-		if (stat(item->d_name, &result->sb) == 0 && S_ISSOCK(result->sb.st_mode)) {
+		char full[dirlen + 256];
+		snprintf(full, sizeof(full), "%s/%s", dir, item->d_name);
+		if (stat(full, &result->sb) == 0 && S_ISSOCK(result->sb.st_mode)) {
 			char *local = strstr(item->d_name, server.host);
 			if (local) {
 				*local = '\0'; /* truncate hostname if we are local */
