@@ -64,14 +64,11 @@
 #define VERSION "v0.develop"
 #endif
 
-// default shell to be used to run the commands
-#define ADDUCO_SHELL "sh"
-// default command to execute if non is given and $ADDUCO_CMD is unset
-#define ADDUCO_CMD "sh"
-// environment variable for user provided shell to use to execute commands
-#define ADDUCO_SHELL_ENV "ADDUCO_CMD_SHELL"
-// environment variable for user provided command to execute by default
-#define ADDUCO_CMD_ENV "ADDUCO_CMD"
+// default command (argv format, NULL-terminated) when $ADDUCO_ARG_1 is unset;
+// edit this single line to change it without touching the code below
+#define ADDUCO_DEFAULT_ARGV { "/bin/sh", NULL }
+// max elements of the default/typed command array (plus terminating NULL)
+#define ADDUCO_MAX_ARGS 64
 // default detach key, can be overriden at run time using -e option
 static char KEY_DETACH = CTRL('\\');
 // redraw key to send a SIGWINCH signal to underlying process
@@ -929,8 +926,7 @@ static void print_help(void) {
 		"  SIGTERM   Detaches a client.\n"
 		"\n"
 		"Environment:\n"
-		"  "ADDUCO_SHELL_ENV"      Shell to use to run the commands (-c plus the command string will be appended); defaults to '" ADDUCO_SHELL "'.\n"
-		"  "ADDUCO_CMD_ENV"      Command to run if none specified; defaults to '" ADDUCO_CMD "'.\n"
+		"  ADDUCO_ARG_1..64  Default command as argv array, stopping at the first missing or empty one; defaults to '/bin/sh'.\n"
 		"  ADDUCO_SESSION  Current session name visible to the command.\n"
 		"  ADDUCO_SOCKET   Absolute path to the session socket.\n"
 		"\n"
@@ -1485,32 +1481,31 @@ static int signal_to_session(int signal, const char* name) {
 	return result;
 }
 
-static char ** get_default_command(char* command){
-	// using shell wrapper mostly to parse space-saparated arguments, however it
-	// adds lot of flexibility when the command is not passed on the command line.
-	static char *default_command = NULL;
-	static char *command_line[] = {NULL, "-c", NULL, NULL};
-	if (default_command == NULL) {
-		char *from_environ;
-		from_environ = getenv(ADDUCO_SHELL_ENV);
-		if (!from_environ || *from_environ == '\0') {
-			command_line[0] = ADDUCO_SHELL;
-		} else {
-			command_line[0] = from_environ;
+static char **default_command_argv(void) {
+	static char *argv[ADDUCO_MAX_ARGS + 1] = {0};
+	static bool done = false;
+	if (!done) {
+		done = true;
+		int n = 0;
+		for (int i = 1; i <= ADDUCO_MAX_ARGS; i++) {
+			char key[32];
+			snprintf(key, sizeof key, "ADDUCO_ARG_%d", i);
+			char *val = getenv(key);
+			if (!val || !*val)
+				break;
+			argv[n++] = val;
 		}
-		from_environ = getenv(ADDUCO_CMD_ENV);
-		if (!from_environ || *from_environ == '\0') {
-			default_command = ADDUCO_CMD;
-		} else {
-			default_command = from_environ;
+		if (n == 0) {
+			static char *fallback[] = ADDUCO_DEFAULT_ARGV;
+			size_t m = sizeof(fallback) / sizeof(fallback[0]);
+			for (size_t i = 0; i < m && n < ADDUCO_MAX_ARGS && fallback[i]; i++)
+				argv[n++] = fallback[i];
+			if (n == 0)
+				argv[n++] = "sh"; /* never empty: broken-config safety net */
 		}
+		argv[n] = NULL;
 	}
-	if (command) {
-		command_line[2] = command;
-	} else {
-		command_line[2] = default_command;
-  }
-	return command_line;
+	return argv;
 }
 
 // --------------------------------------------------------------------------------
@@ -1894,14 +1889,27 @@ static void tui_random_name(char *buf, size_t sz) {
 	} while (session_exists(buf));
 }
 
-// Prompt the user for a command to run and a session name, then create a new
-// session.
+// Prompt the user for a command to run, then create a new session with an
+// auto-generated random name ('m' in the list renames it). An empty command
+// runs the default array as-is, otherwise the typed string becomes argv[0]
+// followed by one prompt per further argument (empty ends, ESC aborts all).
 static char *tui_create_session(const char **msg) {
-	char **argv = get_default_command(NULL);
-	char *defcmd = argv[2];
+	char **defargv = default_command_argv();
+
+	// show the default array space-separated in the prompt
+	char defdisplay[256] = {0};
+	size_t off = 0;
+	for (int i = 0; defargv[i] && off < sizeof(defdisplay) - 1; i++) {
+		off += snprintf(defdisplay + off, sizeof(defdisplay) - off,
+		                "%s%s", i ? " " : "", defargv[i]);
+		if (off >= sizeof(defdisplay)) {
+			off = sizeof(defdisplay) - 1;
+			break;
+		}
+	}
 
 	char cmdprompt[512];
-	snprintf(cmdprompt, sizeof(cmdprompt), "Command to run [%s] (ESC to cancel): ", defcmd);
+	snprintf(cmdprompt, sizeof(cmdprompt), "Command to run [%s] (ESC to cancel): ", defdisplay);
 
 	char *cmd = tui_read_line(cmdprompt);
 	if (!cmd) {
@@ -1909,52 +1917,64 @@ static char *tui_create_session(const char **msg) {
 		return NULL;
 	}
 
-	// generate a random session name up front, then offer it as the default
-	char random_name[8];
-	tui_random_name(random_name, sizeof(random_name));
-
-	char nameprompt[sizeof(random_name) + 64];
-	snprintf(nameprompt, sizeof(nameprompt),
-	         "Session name [%s] (ESC to cancel): ", random_name);
-
-	char *name = tui_read_line(nameprompt);
-	if (!name) {
+	char *argv[ADDUCO_MAX_ARGS + 1];
+	int n = 0;
+	bool custom = cmd[0] != '\0';
+	char *name = NULL;
+	if (!custom) {
 		free(cmd);
-		*msg = "Create cancelled.";
-		return NULL;
-	}
-
-	// empty input -> fall back to the generated random name
-	if (name[0] == '\0') {
-		free(name);
-		name = strdup(random_name);
-		if (!name) {
-			free(cmd);
-			*msg = "Out of memory.";
-			return NULL;
+		for (; defargv[n]; n++)
+			argv[n] = defargv[n];
+	} else {
+		argv[n++] = cmd;
+		while (n < ADDUCO_MAX_ARGS) {
+			char argprompt[64];
+			snprintf(argprompt, sizeof(argprompt),
+			         "Argument %d (ESC to cancel, empty to end): ", n);
+			char *arg = tui_read_line(argprompt);
+			if (!arg) {
+				*msg = "Create cancelled.";
+				goto fail;
+			}
+			if (arg[0] == '\0') {
+				free(arg);
+				break;
+			}
+			argv[n++] = arg;
 		}
 	}
+	argv[n] = NULL;
+
+	name = malloc(8);
+	if (!name) {
+		*msg = "Out of memory.";
+		goto fail;
+	}
+	tui_random_name(name, 8);
 
 	if (session_exists(name)) {
-		free(cmd);
-		free(name);
 		*msg = "Session already exists.";
-		return NULL;
+		goto fail_name;
 	}
-
-	if (cmd[0] != '\0') {
-		argv = get_default_command(cmd);
-	}
-
 	if (!create_session(name, argv)) {
-		free(name);
-		name = NULL;
 		*msg = "Could not create session.";
+		goto fail_name;
 	}
-	free(cmd);
+	if (custom)
+		for (int i = 0; i < n; i++)
+			free(argv[i]);
 
 	// ownership of the session name is transferred to the caller
 	return name;
+
+fail_name:
+	free(name);
+fail:
+	// only typed strings are owned (the default array is static)
+	if (custom)
+		for (int i = 0; i < n; i++)
+			free(argv[i]);
+	return NULL;
 }
 
 // Prompt for a new name and rename the selected session. Pressing ESC at the
@@ -2166,7 +2186,7 @@ int main(int argc, char *argv[]) {
 	if (optind + 1 < argc)
 		cmd = &argv[optind + 1];
 	else
-		cmd = get_default_command(NULL);
+		cmd = default_command_argv();
 
 	if (server.session_name[0] != '\0' && !isatty(STDIN_FILENO) && action != 'i')
 		options.passthrough = true;

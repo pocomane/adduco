@@ -34,8 +34,10 @@ also non-intercative flags are supported.
 
 In order to create a new session `adduco` requires a session name
 as well as an command which will be run. If no command is given
-the environment variable `$ADDUCO_CMD` is examined and if not set
-`sh` is executed. Therefore a new session named *demo* is created with:
+the default command array is used: it is built from the environment
+variables `$ADDUCO_ARG_1`, `$ADDUCO_ARG_2`, ... (stopping at the first
+missing or empty one), or `/bin/sh` if `$ADDUCO_ARG_1` is unset.
+Therefore a new session named *demo* is created with:
 
     $ adduco -c demo
 
