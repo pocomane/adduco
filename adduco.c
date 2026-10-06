@@ -991,23 +991,29 @@ static bool session_alive(const char *name) {
 	       S_ISSOCK(sb.st_mode) && (sb.st_mode & S_IXGRP) == 0;
 }
 
-static bool create_socket_dir(struct sockaddr_un *sockaddr) {
-	char *path = sockaddr->sun_path;
-	int path_max_len = sizeof(sockaddr->sun_path);
-	sockaddr->sun_family = AF_UNIX;
-	static char cache[sizeof(sockaddr->sun_path)] = {0};
-	if (cache[0]){
-		strncpy(path, cache, path_max_len);
-		return true;
+static void set_socket_address(struct sockaddr_un *sa) {
+	sa->sun_family = AF_UNIX;
+}
+
+static const char *create_and_get_socket_dir(size_t *n) {
+	static char cache[sizeof(((struct sockaddr_un *)0)->sun_path)] = {0};
+	static size_t len = ((size_t)-1);
+	if (len != ((size_t)-1)) {
+		if (n) *n = len;
+		return cache[0] ? cache : NULL;
 	}
+	len = 0;
 
-	int socketfd = socket(sockaddr->sun_family, SOCK_STREAM, 0);
-	if (socketfd == -1)
-		return false;
-
-	const size_t maxlen = sizeof(sockaddr->sun_path);
+	char path[sizeof(cache)] = {0};
+	const size_t maxlen = sizeof(path);
 	uid_t uid = getuid();
 	struct passwd *pw = getpwuid(uid);
+
+	struct sockaddr_un probe = {0};
+	set_socket_address(&probe);
+	int socketfd = socket(probe.sun_family, SOCK_STREAM, 0);
+	if (socketfd == -1)
+		return NULL;
 
 	for (unsigned int i = 0; i < countof(socket_dirs); i++) {
 		struct Dir *dir = &socket_dirs[i];
@@ -1026,39 +1032,38 @@ static bool create_socket_dir(struct sockaddr_un *sockaddr) {
 		if (!selected || !selected[0])
 			continue;
 		if (dir->mode != PATH)
-			if (!xsnprintf(sockaddr->sun_path, maxlen, "%s/%s%s/", selected, ishome ? "." : "", server.name))
+			if (!xsnprintf(path, maxlen, "%s/%s%s/", selected, ishome ? "." : "", server.name))
 				continue;
 		mode_t mask = umask(0);
 		int personal = PERSONAL_ENV == dir->mode;
-		int r = mkdir(sockaddr->sun_path, personal ? S_IRWXU : S_IRWXU|S_IRWXG|S_IRWXO|S_ISVTX);
+		int r = mkdir(path, personal ? S_IRWXU : S_IRWXU|S_IRWXG|S_IRWXO|S_ISVTX);
 		umask(mask);
 		if (r != 0 && errno != EEXIST)
 			continue;
 		errno = 0;
 		struct stat sb;
-		if (lstat(sockaddr->sun_path, &sb) != 0)
+		if (lstat(path, &sb) != 0)
 			continue;
 		if (!S_ISDIR(sb.st_mode)) {
 			errno = ENOTDIR;
 			continue;
 		}
 
-		size_t dirlen = strlen(sockaddr->sun_path);
+		size_t dirlen = strlen(path);
 		if (!personal) {
 			// create subdirectory only accessible to user
-			if (pw && !xsnprintf(sockaddr->sun_path+dirlen, maxlen-dirlen, "%s/", pw->pw_name))
+			if (pw && !xsnprintf(path+dirlen, maxlen-dirlen, "%s/", pw->pw_name))
 				continue;
-			if (!pw && !xsnprintf(sockaddr->sun_path+dirlen, maxlen-dirlen, "%d/", uid))
+			if (!pw && !xsnprintf(path+dirlen, maxlen-dirlen, "%d/", uid))
 				continue;
-			if (mkdir(sockaddr->sun_path, S_IRWXU) != 0 && errno != EEXIST)
+			if (mkdir(path, S_IRWXU) != 0 && errno != EEXIST)
 				continue;
-			if (lstat(sockaddr->sun_path, &sb) != 0)
+			if (lstat(path, &sb) != 0)
 				continue;
 			if (!S_ISDIR(sb.st_mode)) {
 				errno = ENOTDIR;
 				continue;
 			}
-			dirlen = strlen(sockaddr->sun_path);
 		}
 
 		if (sb.st_uid != uid || sb.st_mode & (S_IRWXG|S_IRWXO)) {
@@ -1066,29 +1071,32 @@ static bool create_socket_dir(struct sockaddr_un *sockaddr) {
 			continue;
 		}
 
-		if (!xsnprintf(sockaddr->sun_path+dirlen, maxlen-dirlen, ".adduco-%d", getpid()))
+		if (!xsnprintf(probe.sun_path, sizeof(probe.sun_path), "%s.adduco-%d", path, getpid()))
 			continue;
 
-		socklen_t socklen = offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr->sun_path) + 1;
-		if (bind(socketfd, (struct sockaddr*)sockaddr, socklen) == -1)
+		socklen_t socklen = offsetof(struct sockaddr_un, sun_path) + strlen(probe.sun_path) + 1;
+		if (bind(socketfd, (struct sockaddr*)&probe, socklen) == -1)
 			continue;
-		unlink(sockaddr->sun_path);
-		sockaddr->sun_path[dirlen] = '\0';
+		unlink(probe.sun_path);
 
-		strncpy(cache, sockaddr->sun_path, sizeof(cache));
-		strncpy(path, cache, path_max_len);
+		strncpy(cache, path, sizeof(cache));
+		cache[sizeof(cache) - 1] = '\0';
+		len = strlen(cache);
+		if (n) *n = len;
 		close(socketfd);
-		return true;
+		return cache;
 	}
 
 	close(socketfd);
-	return false;
+	return NULL;
 }
 
 static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 	const size_t maxlen = sizeof(sockaddr->sun_path);
 	const char *session_name = NULL;
 	char buf[maxlen];
+
+	set_socket_address(sockaddr);
 
 	if (name[0] == '/') {
 		if (strlen(name) >= maxlen) {
@@ -1103,15 +1111,18 @@ static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 		if (!xsnprintf(sockaddr->sun_path, maxlen, "%s/%s", cwd, name))
 			return false;
 	} else {
-		if (!create_socket_dir(sockaddr))
+		size_t dirlen;
+		const char *dir = create_and_get_socket_dir(&dirlen);
+		if (!dir)
 			return false;
-		if (strlen(sockaddr->sun_path) + strlen(name) + strlen(server.host) >= maxlen) {
+		if (dirlen + strlen(name) + strlen(server.host) >= maxlen) {
 			errno = ENAMETOOLONG;
 			return false;
 		}
 		session_name = name;
-		strncat(sockaddr->sun_path, name, maxlen - strlen(sockaddr->sun_path) - 1);
-		strncat(sockaddr->sun_path, server.host, maxlen - strlen(sockaddr->sun_path) - 1);
+		strcpy(sockaddr->sun_path, dir);
+		strcat(sockaddr->sun_path, name);
+		strcat(sockaddr->sun_path, server.host);
 	}
 
 	if (!session_name) {
@@ -1343,12 +1354,12 @@ static int iterate_over_sessions(struct session_iterator *result) {
 	if (!result->namelist) {
 		result->count = -1;
 		result->current = -1;
-		struct sockaddr_un sockaddr = {0};
-		if (!create_socket_dir(&sockaddr))
+		const char *dir = create_and_get_socket_dir(NULL);
+		if (!dir)
 			return 0;
-		if (chdir(sockaddr.sun_path) == -1)
+		if (chdir(dir) == -1)
 			return 0;
-		result->count = scandir(sockaddr.sun_path, &result->namelist, session_filter, session_comparator);
+		result->count = scandir(dir, &result->namelist, session_filter, session_comparator);
 		if (result->count < 0)
 			return 0;
 	}
@@ -1576,9 +1587,8 @@ static void tui_draw(struct tui_session *names, int count, int sel, int *top, co
 	if (*top < 0)
 		*top = 0;
 
-	struct sockaddr_un sockaddr = {0};
-	create_socket_dir(&sockaddr);
-	fprintf(stdout, "\033[0mSession store: %s - ", sockaddr.sun_path);
+	const char *store = create_and_get_socket_dir(NULL);
+	fprintf(stdout, "\033[0mSession store: %s - ", store ? store : "?");
 	if (count == 0)
 		fprintf(stdout, "No active sessions.\r\n - ---\r\n");
 	else {
