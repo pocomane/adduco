@@ -401,19 +401,42 @@ static bool terminal_set_mode(TermMode mode, struct termios *out) {
 
 static void terminal_alternate_buffer(bool enable) {
 	static bool active = false;
-	if (enable == active) return;
-	active = enable;
-	if (enable) fputs("\033[?1049h\033[H", stdout);
-	else fputs("\033[?1049l", stdout);
+	if (enable) {
+		if (active) return;
+		active = true;
+		fputs("\033[?1049h\033[H", stdout);
+	} else {
+		// always emit: leaving the alternate screen is idempotent and
+		// guarantees the shell gets its screen back even if the supervised
+		// application changed the screen behind our back
+		active = false;
+		fputs("\033[?1049l", stdout);
+	}
 	fflush(stdout);
 }
 
-static void terminal_cursor_show(bool show) {
-	static bool visible = false;
-	if (show == visible) return;
-	visible = show;
-	if (show) fputs("\033[?25h", stdout);
-	else fputs("\033[?25l", stdout);
+// Forget the terminal state a previously attached application may have
+// left behind: graphic rendition, cursor keys, keypad, cursor
+// visibility, mouse reporting, bracketed paste and autowrap. Cheap and
+// harmless if they are already the default ones. It never moves the
+// cursor, so it can be used when giving the terminal back to the shell.
+static void terminal_reset_modes(void) {
+	fputs("\033[0m"          // default graphic rendition
+	      "\033[?1l\033>"    // normal cursor keys / keypad
+	      "\033[?25h"        // cursor visible
+	      "\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l"
+	      "\033[?2004l"      // no mouse tracking, no bracketed paste
+	      "\033[?7h",        // autowrap on
+	      stdout);
+	fflush(stdout);
+}
+
+// Reset the scrolling region to the whole screen. DECSTBM (CSI r) homes the
+// cursor so call it only when the cursor position does not matter, i.e. inside
+// the alternate screen or right before a new application takes over the
+// terminal.
+static void terminal_reset_margins(void) {
+	fputs("\033[r", stdout);
 	fflush(stdout);
 }
 
@@ -421,8 +444,8 @@ static void client_restore_terminal(void) {
 	if (!options.has_term)
 		return;
 	terminal_set_mode(TERM_ORIG, NULL);
-	terminal_cursor_show(true);
 	terminal_alternate_buffer(false);
+	terminal_reset_modes();
 }
 
 static void client_setup_terminal(void) {
@@ -432,6 +455,8 @@ static void client_setup_terminal(void) {
 
 	terminal_set_mode(TERM_RAW_KEEP, NULL);
 	terminal_alternate_buffer(true);
+	terminal_reset_modes();
+	terminal_reset_margins();
 }
 
 static int client_mainloop(void) {
@@ -736,6 +761,26 @@ static void server_atexit_handler(void) {
 	unlink(sockaddr.sun_path);
 }
 
+// Apply a new pty size. If the requested geometry equals the current one most
+// applications would not notice anything, so "jog" the size to a neighbour
+// first: this guarantees a real resize event and therefore a full repaint when
+// reattaching to a session. If want is NULL only the jog is done (read-only
+// clients must not change the size, but should still force a repaint).
+static void server_resize_pty(const struct winsize *want) {
+	struct winsize cur = { 0 }, real;
+	ioctl(server.pty, TIOCGWINSZ, &cur);
+	real = want ? *want : cur;
+	if (cur.ws_row == real.ws_row && cur.ws_col == real.ws_col) {
+		struct winsize jog = real;
+		if (jog.ws_row > 1)
+			jog.ws_row--;
+		else
+			jog.ws_row++;
+		ioctl(server.pty, TIOCSWINSZ, &jog);
+	}
+	ioctl(server.pty, TIOCSWINSZ, &real);
+}
+
 static void server_mainloop(void) {
 	atexit(server_atexit_handler);
 	fd_set new_readfds, new_writefds;
@@ -792,7 +837,7 @@ static void server_mainloop(void) {
 						struct winsize ws = { 0 };
 						ws.ws_row = client_packet.u.ws.rows;
 						ws.ws_col = client_packet.u.ws.cols;
-						ioctl(server.pty, TIOCSWINSZ, &ws);
+						server_resize_pty((c->flags & CLIENT_READONLY) ? NULL : &ws);
 					}
 					pid_t fg = tcgetpgrp(server.pty);
 					if (fg > 0)
@@ -1531,8 +1576,8 @@ struct tui_session {
 // restore the terminal to its original settings (idempotent)
 static void tui_restore_term(void) {
 	terminal_set_mode(TERM_ORIG, NULL);
-	terminal_cursor_show(true);
 	terminal_alternate_buffer(false);
+	terminal_reset_modes();
 }
 
 // switch the terminal into raw mode so we can read single key presses
@@ -1542,6 +1587,8 @@ static void tui_enter_raw(void) {
 	// run the session list in the alternate screen so it does not
 	// pollute the terminal scrollback
 	terminal_alternate_buffer(true);
+	terminal_reset_modes();
+	terminal_reset_margins();
 }
 
 // read a single byte from stdin, waiting at most timeout_ms (or forever if < 0).
