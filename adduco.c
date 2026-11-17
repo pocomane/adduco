@@ -104,7 +104,7 @@ static struct Dir {
 #define countof(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 struct {
-  bool has_term, quiet, passthrough;
+  bool has_term, quiet, passthrough, no_workarounds;
 } options;
 
 enum PacketType {
@@ -459,6 +459,21 @@ static void client_setup_terminal(void) {
 	terminal_reset_margins();
 }
 
+static long long client_now_ms(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static bool client_send_resize(const struct winsize *ws) {
+	Packet pkt = {
+		.type = MSG_RESIZE,
+		.u = { .ws = { .rows = ws->ws_row, .cols = ws->ws_col } },
+		.len = sizeof(pkt.u.ws),
+	};
+	return client_send_packet(&pkt);
+}
+
 static int client_mainloop(void) {
 	sigset_t emptyset, blockset;
 	sigemptyset(&emptyset);
@@ -474,6 +489,16 @@ static int client_mainloop(void) {
 	};
 	client_send_packet(&pkt);
 
+	struct winsize real_ws = { 0 };
+
+	// Applications only repaint when they observe a geometry change: when they
+	// handle SIGWINCH they read the size and skip the repaint if it did not
+	// change. Send a jogged size on attach and the real one shortly after, so the
+	// application sees two real changes and redraws the whole screen.
+#define ATTACH_JOG_MS 100
+	long long jog_deadline = 0;      /* ms deadline, 0 = no jog pending */
+	bool jog_attach = !options.no_workarounds;
+
 	while (server.running) {
 		fd_set fds;
 		FD_ZERO(&fds);
@@ -483,21 +508,50 @@ static int client_mainloop(void) {
 		if (client.need_resize) {
 			struct winsize ws;
 			if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) != -1) {
-				Packet pkt = {
-					.type = MSG_RESIZE,
-					.u = { .ws = { .rows = ws.ws_row, .cols = ws.ws_col } },
-					.len = sizeof(pkt.u.ws),
-				};
-				if (client_send_packet(&pkt))
+				real_ws = ws;
+				if (jog_deadline) {
 					client.need_resize = false;
+				} else if (jog_attach) {
+					struct winsize jog = ws;
+					if (jog.ws_row > 1)
+						jog.ws_row--;
+					else
+						jog.ws_row++;
+					if (client_send_resize(&jog)) {
+						jog_attach = false;
+						jog_deadline = client_now_ms() + ATTACH_JOG_MS;
+						client.need_resize = false;
+					}
+				} else if (client_send_resize(&ws)) {
+					client.need_resize = false;
+				}
 			}
 		}
 
-		if (pselect(server.socket+1, &fds, NULL, NULL, NULL, &emptyset) == -1) {
+		struct timespec timeout, *ptimeout = NULL;
+		if (jog_deadline) {
+			long long left = jog_deadline - client_now_ms();
+			if (left < 0)
+				left = 0;
+			timeout.tv_sec = left / 1000;
+			timeout.tv_nsec = (left % 1000) * 1000000;
+			ptimeout = &timeout;
+		}
+
+		int ready = pselect(server.socket+1, &fds, NULL, NULL, ptimeout, &emptyset);
+		if (ready == -1) {
 			if (errno == EINTR)
 				continue;
 			die("client-mainloop");
 		}
+
+		if (jog_deadline && client_now_ms() >= jog_deadline) {
+			if (client_send_resize(&real_ws))
+				jog_deadline = 0;
+		}
+
+		if (ready == 0)
+			continue;
 
 		if (FD_ISSET(server.socket, &fds)) {
 			Packet pkt;
@@ -761,26 +815,6 @@ static void server_atexit_handler(void) {
 	unlink(sockaddr.sun_path);
 }
 
-// Apply a new pty size. If the requested geometry equals the current one most
-// applications would not notice anything, so "jog" the size to a neighbour
-// first: this guarantees a real resize event and therefore a full repaint when
-// reattaching to a session. If want is NULL only the jog is done (read-only
-// clients must not change the size, but should still force a repaint).
-static void server_resize_pty(const struct winsize *want) {
-	struct winsize cur = { 0 }, real;
-	ioctl(server.pty, TIOCGWINSZ, &cur);
-	real = want ? *want : cur;
-	if (cur.ws_row == real.ws_row && cur.ws_col == real.ws_col) {
-		struct winsize jog = real;
-		if (jog.ws_row > 1)
-			jog.ws_row--;
-		else
-			jog.ws_row++;
-		ioctl(server.pty, TIOCSWINSZ, &jog);
-	}
-	ioctl(server.pty, TIOCSWINSZ, &real);
-}
-
 static void server_mainloop(void) {
 	atexit(server_atexit_handler);
 	fd_set new_readfds, new_writefds;
@@ -837,7 +871,7 @@ static void server_mainloop(void) {
 						struct winsize ws = { 0 };
 						ws.ws_row = client_packet.u.ws.rows;
 						ws.ws_col = client_packet.u.ws.cols;
-						server_resize_pty((c->flags & CLIENT_READONLY) ? NULL : &ws);
+						ioctl(server.pty, TIOCSWINSZ, &ws);
 					}
 					pid_t fg = tcgetpgrp(server.pty);
 					if (fg > 0)
@@ -964,6 +998,7 @@ static void print_help(void) {
 		"  -p  Pass stdin content to session (implies -q and -l).\n"
 		"  -q  Quiet mode; suppress informative messages.\n"
 		"  -r  Read-only mode; ignore user input.\n"
+		"  -x  Disable terminal workarounds (e.g. the resize jog sent on attach).\n"
 		"\n"
 		"Signals:\n"
 		"  SIGWINCH  Sent to supervised process when primary client resizes terminal.\n"
@@ -2181,7 +2216,7 @@ int main(int argc, char *argv[]) {
 	server.name = basename(argv[0]);
 	gethostname(server.host+1, sizeof(server.host) - 1);
 
-	while ((opt = getopt(argc, argv, "aAclne:fpqrkm:hs")) != -1) {
+	while ((opt = getopt(argc, argv, "aAclne:fpqrkm:hsx")) != -1) {
 		switch (opt) {
 		case 'a':
 		case 'A':
@@ -2214,6 +2249,9 @@ int main(int argc, char *argv[]) {
 			break;
 		case 'r':
 			client.flags |= CLIENT_READONLY;
+			break;
+		case 'x':
+			options.no_workarounds = true;
 			break;
 		case 'l':
 			client.flags |= CLIENT_LOWPRIORITY;
