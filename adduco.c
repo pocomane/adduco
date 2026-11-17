@@ -440,9 +440,15 @@ static void terminal_reset_margins(void) {
 	fflush(stdout);
 }
 
+// True while adduco owns the terminal (raw mode, alternate screen and reset
+// modes). It makes setup/restore idempotent, so the handlers registered with
+// atexit() do not emit the restore sequences twice.
+static bool terminal_owned = false;
+
 static void client_restore_terminal(void) {
-	if (!options.has_term)
+	if (!options.has_term || !terminal_owned)
 		return;
+	terminal_owned = false;
 	terminal_set_mode(TERM_ORIG, NULL);
 	terminal_alternate_buffer(false);
 	terminal_reset_modes();
@@ -453,6 +459,7 @@ static void client_setup_terminal(void) {
 		return;
 	atexit(client_restore_terminal);
 
+	terminal_owned = true;
 	terminal_set_mode(TERM_RAW_KEEP, NULL);
 	terminal_alternate_buffer(true);
 	terminal_reset_modes();
@@ -1610,6 +1617,9 @@ struct tui_session {
 
 // restore the terminal to its original settings (idempotent)
 static void tui_restore_term(void) {
+	if (!terminal_owned)
+		return;
+	terminal_owned = false;
 	terminal_set_mode(TERM_ORIG, NULL);
 	terminal_alternate_buffer(false);
 	terminal_reset_modes();
@@ -1619,6 +1629,7 @@ static void tui_restore_term(void) {
 static void tui_enter_raw(void) {
 	if (!terminal_set_mode(TERM_RAW_TRASH, NULL))
 		return;
+	terminal_owned = true;
 	// run the session list in the alternate screen so it does not
 	// pollute the terminal scrollback
 	terminal_alternate_buffer(true);

@@ -4,6 +4,13 @@ APPPATH="./build/adduco"
 # set detach key explicitly in case it was changed in config.h
 CLI_OPTS="-e ^\\"
 
+# Terminal sequences written by adduco on attach and when the terminal is
+# given back; keep in sync with terminal_reset_modes() and
+# terminal_reset_margins() in adduco.c.
+TERM_RESET="$(printf '\033[0m\033[?1l\033>\033[?25h\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l\033[?2004l\033[?7h')"
+TERM_PROLOG="$(printf '\033[?1049h\033[H%s\033[r' "$TERM_RESET")"
+TERM_EPILOG="$(printf '\033[?1049l%s' "$TERM_RESET")"
+
 [ ! -z "$1" ] && APPPATH="$1"
 [ ! -x "$APPPATH" ] && echo "usage: $0 /path/to/app" && exit 1
 
@@ -18,7 +25,7 @@ detach() {
 }
 
 expected_prolog() {
-	printf "[?1049h[H"
+	printf "%s" "$TERM_PROLOG"
 	echo
 	echo "$APPNAME: $1 - attached"
 	echo
@@ -26,7 +33,7 @@ expected_prolog() {
 
 # $1 => session-name, $2 => exit status
 expected_epilog() {
-	echo "[?25h[?1049l$APPNAME: $1 - session terminated with exit status $2"
+	printf "%s$APPNAME: %s - session terminated with exit status %s\n" "$TERM_EPILOG" "$1" "$2"
 }
 
 # $1 => session-name, $2 => cmd to run
