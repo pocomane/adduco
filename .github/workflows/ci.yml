@@ -7,19 +7,11 @@ jobs:
       contents: write # needed to push a new tag
     steps:
       - uses: actions/checkout@v2
-      
-      - name: Setup latest Alpine Linux
-        uses: jirutka/setup-alpine@v1
-        with:
-          apk-tools-url: https://gitlab.alpinelinux.org/api/v4/projects/5/packages/generic/v3.0.7/x86_64/apk.static#!sha256!c07bf5356eacc9dd7a8c56bc537f46702f007170287403299d52a04264e74b3c
-
+    
       - name: Build all
         run: |
-          apk add gcc musl-dev
-          chmod ugo+x make.sh
-          CFLAGS=" -static " ./make.sh
-        shell: alpine.sh --root {0}
-        
+          sudo sh -c 'chmod ugo+x corun.sh make.sh; ./corun.sh ./make.sh'
+
       - name: Generate Tag
         id: generate_tag
         run: |
