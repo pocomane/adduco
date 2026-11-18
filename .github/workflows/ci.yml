@@ -10,7 +10,6 @@ jobs:
       
       - name: Build all
         run: |
-          sudo echo apt-get install bubblewrap
           sudo chmod ugo+x corun.sh make.sh
           sudo echo 'include <tunables/global>' >> /etc/apparmor.d/local/mybwrap
           sudo echo "'$PWD'/cache/container/coresys/bwrap {" >> /etc/apparmor.d/local/mybwrap
