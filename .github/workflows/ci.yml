@@ -8,8 +8,6 @@ jobs:
     steps:
       - uses: actions/checkout@v2
     
-      # Using docker image since ubuntu runner does not allow namespace creation
-      # (needed by the corun wrapper)
       - name: Build all
         run: |
           sudo sh -c 'chmod ugo+x corun.sh make.sh; ./corun.sh ./make.sh'
