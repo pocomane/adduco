@@ -12,7 +12,7 @@ jobs:
       # (needed by the corun wrapper)
       - name: Build all
         run: |
-          docker run --rm \
+          sudo podman run --rm \
             --privileged \
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work \
