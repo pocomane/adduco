@@ -10,7 +10,6 @@ jobs:
       
       - name: Build all
         run: |
-          rm -f /etc/apparmor.d/mybwrap
           ls /etc/apparmor.d/
           echo 'abi <abi/4.0>' >> /etc/apparmor.d/mybwrap
           echo 'include <tunables/global>' >> /etc/apparmor.d/mybwrap
