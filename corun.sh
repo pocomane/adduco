@@ -243,9 +243,10 @@ container_run(){
     --setenv PATH "/bin:/usr/bin:/sbin:/usr/sbin:/$CORESYS_FOLDER"  \
     --ro-bind /etc/resolv.conf /etc/resolv.conf \
     --ro-bind /etc/hosts /etc/hosts \
-    --ro-bind /etc/services /etc/services \
     \
     --bind "$GUEST_SHARE_PATH" "$CONT_WORK_DIR"
+    
+ # --ro-bind /etc/services /etc/services \
 
   # Set CORUN_KEEP_CHILD to anything to avoid the whole process subtree
   # to be killed when the main shell exit (useful with tmux, abduco, etc).
