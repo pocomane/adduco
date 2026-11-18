@@ -10,9 +10,15 @@ jobs:
       
       - name: Build all
         run: |
-          sudo apt-get install bubblewrap
+          sudo echo apt-get install bubblewrap
           sudo chmod ugo+x corun.sh make.sh
-          CORUN_USE_HOST_BWRAP=yes sudo ./corun.sh ./make.sh
+          sudo echo 'include <tunables/global>' >> /etc/apparmor.d/local/mybwrap
+          sudo echo "'$PWD'/cache/container/coresys/bwrap {" >> /etc/apparmor.d/local/mybwrap
+          sudo echo '  userns,' >> /etc/apparmor.d/local/mybwrap
+          sudo echo '}' >> /etc/apparmor.d/local/mybwrap
+          sudo cat /etc/apparmor.d/local/mybwrap
+          sudo apparmor_parser -r /etc/apparmor.d/local/mybwrap
+          sudo ./corun.sh ./make.sh
         
       - name: Generate Tag
         id: generate_tag
