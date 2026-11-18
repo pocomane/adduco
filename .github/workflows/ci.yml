@@ -13,6 +13,7 @@ jobs:
       - name: Build all
         run: |
           docker run --rm \
+            --privileged \
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work \
             busybox:1.36 \
