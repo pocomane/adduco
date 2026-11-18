@@ -3,7 +3,7 @@ This software is a fork of [abduco](https://github.com/martanne/abduco) that
 mainly adds an interactive mode, plus some other small changes. Currently, the
 interface is a proof of concept and was mostly written by AI: I am planning
 to rewrite it once it has stabilized. All the other changes to the code are
-made or deeply reviewd by an human.
+made or deeply reviewed by an human.
 
 <p align="center">
   <img src="demo.gif" alt="TUI Demo" width="1000" />
