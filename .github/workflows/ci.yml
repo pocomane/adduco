@@ -7,21 +7,21 @@ jobs:
       contents: write # needed to push a new tag
     steps:
       - uses: actions/checkout@v2
-      
+    
+      # Using docker image since ubuntu runner does not allow namespace creation
+      # (needed by the corun wrapper)
+      - name: Esegui in BusyBox
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work \
+            busybox:1.36 \
+            sh -c './test.sh'
+
       - name: Build all
         run: |
-          sudo sysctl kernel.unprivileged_userns_clone
-          sudo sysctl kernel.apparmor_restrict_unprivileged_userns
-          sudo ./cache/container/coresys/bwrap --ro-bind / / /bin/true
-          sudo chmod ugo+x corun.sh make.sh
-          cat <<EOF | sudo tee /etc/apparmor.d/mybwrap
-            include <tunables/global>
-            $PWD/cache/container/coresys/bwrap {
-              userns,
-            }
-          EOF
-          sudo systemctl restart apparmor
-          sudo ./corun.sh ./make.sh
+          chmod ugo+x corun.sh make.sh
+          ./corun.sh ./make.sh
         
       - name: Generate Tag
         id: generate_tag
