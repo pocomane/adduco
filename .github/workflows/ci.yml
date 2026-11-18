@@ -10,6 +10,7 @@ jobs:
       
       - name: Build all
         run: |
+          apt-get install bwrap
           chmod ugo+x corun.sh make.sh
           ./corun.sh ./make.sh
         
