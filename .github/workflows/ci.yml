@@ -10,6 +10,9 @@ jobs:
       
       - name: Build all
         run: |
+          sudo sysctl kernel.unprivileged_userns_clone
+          sudo sysctl kernel.apparmor_restrict_unprivileged_userns
+          sudo ./cache/container/coresys/bwrap --ro-bind / / /bin/true
           sudo chmod ugo+x corun.sh make.sh
           cat <<EOF | sudo tee /etc/apparmor.d/mybwrap
             include <tunables/global>
