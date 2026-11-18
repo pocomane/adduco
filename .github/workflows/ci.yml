@@ -2,7 +2,7 @@ name: Make_All
 on: push
 jobs:
   Make_All:
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     permissions:
       contents: write # needed to push a new tag
     steps:
