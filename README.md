@@ -1,3 +1,14 @@
+
+This software is a fork of [abduco](https://github.com/martanne/abduco) that
+mainly adds an interactive mode, plus some other small changes. Currently, the
+interface is a proof of concept and was mostly written by AI: I am planning
+to rewrite it once it has stabilized. All the other changes to the code are
+made or deeply reviewd by an human.
+
+<p align="center">
+  <img src="demo.gif" alt="TUI Demo" width="1000" />
+</p>
+
 # adduco a tool for session {at,de}tach support
 
 [adduco](https://github.com/pocomane/adduco) provides
@@ -9,11 +20,6 @@ run in the background - and then later reattached. It is licensed under the
 Refer to the [github tools](https://github.com/pocomane/adduco) for comments,
 suggestions, ideas, to a bug report, a patch or something else related to
 adduco.
-
-This software is a fork of [abduco](https://github.com/martanne/abduco) that
-mainly adds an interactive mode, plus some other small changes. Currently, the
-interface is a proof of concept and was mostly written by AI: I am planning
-to rewrite it once it has stabilized.
 
 ## Download
 
