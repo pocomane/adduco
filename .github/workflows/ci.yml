@@ -11,11 +11,12 @@ jobs:
       - name: Build all
         run: |
           sudo chmod ugo+x corun.sh make.sh
-          sudo echo 'include <tunables/global>' > /etc/apparmor.d/mybwrap
-          sudo echo "'$PWD'/cache/container/coresys/bwrap {" >> /etc/apparmor.d/mybwrap
-          sudo echo '  userns,' >> /etc/apparmor.d/mybwrap
-          sudo echo '}' >> /etc/apparmor.d/mybwrap
-          sudo cat /etc/apparmor.d/mybwrap
+          cat <<EOF | sudo tee /etc/apparmor.d/mybwrap
+            include <tunables/global>
+            $PWD/cache/container/coresys/bwrap {
+              userns,
+            }
+          EOF
           sudo apparmor_parser -r /etc/apparmor.d/mybwrap
           sudo ./corun.sh ./make.sh
         
