@@ -347,8 +347,11 @@ EOFFFFF
   fi
 
   # set -x
-  #exec "$HOST_SCRIPT_DIR/$IMAGE_FS/$CORESYS_FOLDER"/bwrap "$@"
-  exec bwrap "$@"
+  if [ "$CORUN_USE_HOST_BWRAP" = "" ] ; then
+    exec "$HOST_SCRIPT_DIR/$IMAGE_FS/$CORESYS_FOLDER"/bwrap "$@"
+  else
+    exec bwrap "$@"
+  fi
 }
 
 main(){
