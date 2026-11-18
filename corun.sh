@@ -29,6 +29,8 @@ KEEP_HOLDER_PIDFILE="$HOST_SCRIPT_DIR/$IMAGE_FS/.keep-holder.pid"
 KEEP_TMUX_HOSTDIR="$HOST_SCRIPT_DIR/$IMAGE_FS/keep-tmux"
 KEEP_TMUX_CONTDIR="/tmp/corun-keep"
 
+CORUN_BWRAP_COMMAND="${CORUN_BWRAP_COMMAND:-$HOST_SCRIPT_DIR/$IMAGE_FS/$CORESYS_FOLDER/bwrap}"
+
 # #############################################################################
 # Launcher utility
 
@@ -62,7 +64,7 @@ create_container_image_bootstrap(){
   rm -fR "$HOST_SCRIPT_DIR/$IMAGE_FS"/torem
 
   cd "$HOST_SCRIPT_DIR/$IMAGE_FS/$CORESYS_FOLDER"
-  ./bwrap --bind ../ / -- "/$CORESYS_FOLDER/busybox" --install -s "/$CORESYS_FOLDER/"
+  "$CORUN_BWRAP_COMMAND" --bind ../ / -- "/$CORESYS_FOLDER/busybox" --install -s "/$CORESYS_FOLDER/"
   cd -
 }
 
@@ -117,14 +119,13 @@ corun_ensure_keep_holder(){
     CORUN_ATTACH="$_khp"
     return 0
   fi
-  _kh_bwrap="$HOST_SCRIPT_DIR/$IMAGE_FS/$CORESYS_FOLDER/bwrap"
   _kh_busybox="$HOST_SCRIPT_DIR/$IMAGE_FS/$CORESYS_FOLDER/busybox"
   _kh_info="${KEEP_HOLDER_PIDFILE}.info.$$.tmp"
   rm -f "$_kh_info"
   LAST_FD=$((LAST_FD + 1))
   _kh_fd=$LAST_FD
   eval "exec ${_kh_fd}>'$_kh_info'"
-  "$_kh_bwrap" --unshare-pid \
+  "$CORUN_BWRAP_COMMAND" --unshare-pid \
     --bind / / --proc /proc --dev /dev \
     --setenv CORUN_KEEP_HOLDER 1 \
     --info-fd "$_kh_fd" \
@@ -347,11 +348,7 @@ EOFFFFF
   fi
 
   # set -x
-  if [ "$CORUN_USE_HOST_BWRAP" = "" ] ; then
-    exec "$HOST_SCRIPT_DIR/$IMAGE_FS/$CORESYS_FOLDER"/bwrap "$@"
-  else
-    exec bwrap "$@"
-  fi
+  exec "$CORUN_BWRAP_COMMAND" "$@"
 }
 
 main(){
