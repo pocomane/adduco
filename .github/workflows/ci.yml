@@ -11,6 +11,14 @@ jobs:
       - name: Build all
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          rm -f /etc/apparmor.d/mybwrap
+          ls /etc/apparmor.d/
+          echo 'abi <abi/4.0>' >> /etc/apparmor.d/mybwrap
+          echo 'include <tunables/global>' >> /etc/apparmor.d/mybwrap
+          echo "profile bwrap '$PWD'/cache/container/coresys/bwrap flags=(unconfined) {" >> /etc/apparmor.d/mybwrap
+          echo '  userns,' >> /etc/apparmor.d/mybwrap
+          echo '}' >> /etc/apparmor.d/mybwrap
+          cat /etc/apparmor.d/mybwrap
           chmod ugo+x corun.sh make.sh
           ./corun.sh ./make.sh
         
