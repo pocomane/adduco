@@ -12,12 +12,7 @@ jobs:
       # (needed by the corun wrapper)
       - name: Build all
         run: |
-          sudo podman run --rm \
-            --privileged \
-            -v "$GITHUB_WORKSPACE:/work" \
-            -w /work \
-            busybox:1.36 \
-            sh -c 'chmod ugo+x corun.sh make.sh; ./corun.sh ./make.sh'
+          sudo sh -c 'chmod ugo+x corun.sh make.sh; ./corun.sh ./make.sh'
 
       - name: Generate Tag
         id: generate_tag
