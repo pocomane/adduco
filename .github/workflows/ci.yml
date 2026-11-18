@@ -15,10 +15,8 @@ jobs:
 
       - name: Build all
         run: |
-          apk add gcc musl-dev
-          chmod ugo+x make.sh
-          CFLAGS=" -static " ./make.sh
-        shell: alpine.sh --root {0}
+          chmod ugo+x corun.sh make.sh
+          ./corun.sh ./make.sh
         
       - name: Generate Tag
         id: generate_tag
