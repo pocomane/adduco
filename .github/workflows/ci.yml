@@ -10,7 +10,6 @@ jobs:
       
       - name: Build all
         run: |
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           rm -f /etc/apparmor.d/mybwrap
           ls /etc/apparmor.d/
           echo 'abi <abi/4.0>' >> /etc/apparmor.d/mybwrap
