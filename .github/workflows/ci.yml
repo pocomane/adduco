@@ -11,12 +11,12 @@ jobs:
       - name: Build all
         run: |
           sudo chmod ugo+x corun.sh make.sh
-          sudo echo 'include <tunables/global>' >> /etc/apparmor.d/local/mybwrap
-          sudo echo "'$PWD'/cache/container/coresys/bwrap {" >> /etc/apparmor.d/local/mybwrap
-          sudo echo '  userns,' >> /etc/apparmor.d/local/mybwrap
-          sudo echo '}' >> /etc/apparmor.d/local/mybwrap
-          sudo cat /etc/apparmor.d/local/mybwrap
-          sudo apparmor_parser -r /etc/apparmor.d/local/mybwrap
+          sudo echo 'include <tunables/global>' > /etc/apparmor.d/mybwrap
+          sudo echo "'$PWD'/cache/container/coresys/bwrap {" >> /etc/apparmor.d/mybwrap
+          sudo echo '  userns,' >> /etc/apparmor.d/mybwrap
+          sudo echo '}' >> /etc/apparmor.d/mybwrap
+          sudo cat /etc/apparmor.d/mybwrap
+          sudo apparmor_parser -r /etc/apparmor.d/mybwrap
           sudo ./corun.sh ./make.sh
         
       - name: Generate Tag
