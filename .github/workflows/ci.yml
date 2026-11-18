@@ -10,11 +10,6 @@ jobs:
       
       - name: Build all
         run: |
-          echo 'include <tunables/global>' >> /etc/apparmor.d/local/mybwrap
-          echo "'$PWD'/cache/container/coresys/bwrap {" >> /etc/apparmor.d/local/mybwrap
-          echo '  userns,' >> /etc/apparmor.d/local/mybwrap
-          echo '}' >> /etc/apparmor.d/local/mybwrap
-          cat /etc/apparmor.d/local/mybwrap
           chmod ugo+x corun.sh make.sh
           ./corun.sh ./make.sh
         

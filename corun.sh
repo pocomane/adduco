@@ -347,7 +347,8 @@ EOFFFFF
   fi
 
   # set -x
-  exec "$HOST_SCRIPT_DIR/$IMAGE_FS/$CORESYS_FOLDER"/bwrap "$@"
+  #exec "$HOST_SCRIPT_DIR/$IMAGE_FS/$CORESYS_FOLDER"/bwrap "$@"
+  exec bwrap "$@"
 }
 
 main(){
