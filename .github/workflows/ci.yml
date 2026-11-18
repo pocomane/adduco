@@ -17,7 +17,7 @@ jobs:
               userns,
             }
           EOF
-          sudo apparmor_parser -r /etc/apparmor.d/mybwrap
+          sudo systemctl restart apparmor
           sudo ./corun.sh ./make.sh
         
       - name: Generate Tag
