@@ -482,11 +482,17 @@ static bool client_send_resize(const struct winsize *ws) {
 }
 
 static int client_mainloop(void) {
-	sigset_t emptyset, blockset;
+	sigset_t emptyset, blockset, oldmask;
 	sigemptyset(&emptyset);
 	sigemptyset(&blockset);
 	sigaddset(&blockset, SIGWINCH);
-	sigprocmask(SIG_BLOCK, &blockset, NULL);
+	// SIGWINCH stays blocked while the loop is not waiting, so a resize
+	// arriving between the check below and pselect() is not lost; pselect()
+	// unblocks it atomically during the wait. Restore the previous mask before
+	// returning: processes forked later would inherit it.
+	sigprocmask(SIG_BLOCK, &blockset, &oldmask);
+
+	int status = -EIO;
 
 	client.need_resize = true;
 	Packet pkt = {
@@ -574,7 +580,8 @@ static int client_mainloop(void) {
 				case MSG_EXIT:
 					client_send_packet(&pkt);
 					close(server.socket);
-					return pkt.u.i;
+					status = pkt.u.i;
+					goto out;
 				}
 			}
 		}
@@ -594,18 +601,22 @@ static int client_mainloop(void) {
 					pkt.len = 0;
 					client_send_packet(&pkt);
 					close(server.socket);
-					return -1;
+					status = -1;
+					goto out;
 				} else if (!(client.flags & CLIENT_READONLY)) {
 					client_send_packet(&pkt);
 				}
 			} else if (len == 0) {
 				info(DEBUG, "client-stdin: EOF\n");
-				return -1;
+				status = -1;
+				goto out;
 			}
 		}
 	}
 
-	return -EIO;
+out:
+	sigprocmask(SIG_SETMASK, &oldmask, NULL);
+	return status;
 }
 
 // --------------------------------------------------------------------------------
