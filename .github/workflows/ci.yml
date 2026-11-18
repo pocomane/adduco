@@ -10,7 +10,7 @@ jobs:
       
       - name: Build all
         run: |
-          sudo apt-get install bwrap
+          sudo apt-get install bubblewrap
           chmod ugo+x corun.sh make.sh
           CORUN_USE_HOST_BWRAP=yes ./corun.sh ./make.sh
         
