@@ -1,15 +1,20 @@
 
-This software is a fork of [abduco](https://github.com/martanne/abduco) that
-mainly adds an interactive mode, plus some other small changes. Currently, the
-interface is a proof of concept and was mostly written by AI: I am planning
-to rewrite it once it has stabilized. All the other changes to the code are
-made or deeply reviewed by an human.
+# Adduco
+
+This software is a fork of abduco that mainly adds an interactive mode, along
+with a few other small changes. Currently, the interface is a proof of concept
+and was mostly written by AI; I plan to rewrite it once it stabilizes. All
+other changes to the code have been written or thoroughly reviewed by a human.
+
+Just like the original single-session mode, the interactive mode supports only
+one key sequence: `Ctrl-/`. It is used from inside a session to return to the
+list of all sessions.
 
 <p align="center">
   <img src="demo.gif" alt="TUI Demo" width="1000" />
 </p>
 
-# adduco a tool for session {at,de}tach support
+# Tool for session {at,de}tach
 
 [adduco](https://github.com/pocomane/adduco) provides
 session management i.e. it allows programs to be run independently
