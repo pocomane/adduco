@@ -50,13 +50,6 @@
 # include <util.h>
 #endif
 
-#if defined CTRL && defined _AIX
-  #undef CTRL
-#endif
-#ifndef CTRL
-  #define CTRL(k)   ((k) & 0x1F)
-#endif
-
 // --------------------------------------------------------------------------------
 // Configuration
 
@@ -69,8 +62,9 @@
 #define ADDUCO_DEFAULT_ARGV { "/bin/sh", NULL }
 // max elements of the default/typed command array (plus terminating NULL)
 #define ADDUCO_MAX_ARGS 64
-// default detach key, can be overriden at run time using -e option
-static char KEY_DETACH = CTRL('\\');
+// default detach key, can be overriden at run time using -e option;
+// this is the base key, the actual detach is Ctrl+<key>
+static char DETACH_KEY = '\\';
 // redraw key to send a SIGWINCH signal to underlying process
 // (set to 0 to disable the redraw key)
 static char KEY_REDRAW = 0;
@@ -426,7 +420,8 @@ static void terminal_reset_modes(void) {
 	      "\033[?25h"        // cursor visible
 	      "\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l"
 	      "\033[?2004l"      // no mouse tracking, no bracketed paste
-	      "\033[?7h",        // autowrap on
+	      "\033[?7h"         // autowrap on
+	      "\033[<u\033[>4;0m", // disable enhanced keyboard protocols
 	      stdout);
 	fflush(stdout);
 }
@@ -479,6 +474,52 @@ static bool client_send_resize(const struct winsize *ws) {
 		.len = sizeof(pkt.u.ws),
 	};
 	return client_send_packet(&pkt);
+}
+
+static bool client_detach_check(const unsigned char *buf, size_t len) {
+	unsigned char key = (unsigned char)DETACH_KEY;
+	unsigned int codepoint = key;
+
+	if (len == 0) return false;
+
+	// ASCII byte: CTRL+key
+	if (buf[0] == (key & 0x1F)) return true;
+
+	// Xterm modifyOtherKeys: ESC [ 27 ; 5 ; <codepoint> ~
+	char seq[32];
+	int n = snprintf(seq, sizeof(seq), "\033[27;5;%u~", codepoint);
+	if (len > 3 && buf[0] == 27 && buf[1] == '[' && n > 0 && (size_t)n <= len && !memcmp(buf, seq, n))
+		return true;
+
+	// Kitty: ESC [ <codepoint>[:alt...] ; <modifier>[:event] u
+	size_t i = 2;
+	unsigned long value = 0;
+	if (len > 3 && buf[0] == 27 && buf[1] == '[' && buf[i] >= '0' && buf[i] <= '9') {
+		while (i < len && buf[i] >= '0' && buf[i] <= '9')
+			value = value * 10 + buf[i++] - '0';
+		if (value == codepoint) {
+			while (i < len && buf[i] != ';') // skip alternate key fields
+				i++;
+			if (i++ < len) {
+				value = 0;
+				while (i < len && buf[i] >= '0' && buf[i] <= '9')
+					value = value * 10 + buf[i++] - '0';
+				if (value && ((value - 1) & ~(64UL | 128UL) & 4)) {
+					bool release = false;
+					if (i < len && buf[i] == ':') {
+						unsigned long event = 0;
+						for (i++; i < len && buf[i] >= '0' && buf[i] <= '9'; i++)
+							event = event * 10 + buf[i] - '0';
+						release = (event == 3);
+					}
+					if (!release && i < len && buf[i] == 'u')
+						return true;
+				}
+			}
+		}
+	}
+
+	return false;
 }
 
 static int client_mainloop(void) {
@@ -596,7 +637,7 @@ static int client_mainloop(void) {
 				pkt.len = len;
 				if (KEY_REDRAW && pkt.u.msg[0] == KEY_REDRAW) {
 					client.need_resize = true;
-				} else if (pkt.u.msg[0] == KEY_DETACH) {
+				} else if (client_detach_check((unsigned char *)pkt.u.msg, len)) {
 					pkt.type = MSG_DETACH;
 					pkt.len = 0;
 					client_send_packet(&pkt);
@@ -2256,9 +2297,7 @@ int main(int argc, char *argv[]) {
 		case 'e':
 			if (!optarg)
 				wrong_usage();
-			if (optarg[0] == '^' && optarg[1])
-				optarg[0] = CTRL(optarg[1]);
-			KEY_DETACH = optarg[0];
+			DETACH_KEY = (optarg[0] == '^' && optarg[1]) ? optarg[1] : optarg[0];
 			break;
 		case 'f':
 			force = true;

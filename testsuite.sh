@@ -7,7 +7,7 @@ CLI_OPTS="-e ^\\"
 # Terminal sequences written by adduco on attach and when the terminal is
 # given back; keep in sync with terminal_reset_modes() and
 # terminal_reset_margins() in adduco.c.
-TERM_RESET="$(printf '\033[0m\033[?1l\033>\033[?25h\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l\033[?2004l\033[?7h')"
+TERM_RESET="$(printf '\033[0m\033[?1l\033>\033[?25h\033[?1000l\033[?1002l\033[?1003l\033[?1005l\033[?1006l\033[?2004l\033[?7h\033[<u\033[>4;0m')"
 TERM_PROLOG="$(printf '\033[?1049h\033[H%s\033[r' "$TERM_RESET")"
 TERM_EPILOG="$(printf '\033[?1049l%s' "$TERM_RESET")"
 
@@ -22,6 +22,18 @@ TESTS_RUN=0
 detach() {
 	sleep 1
 	printf ""
+}
+
+# Same key, but encoded as the attached application may ask the terminal to do
+# when it enables an enhanced keyboard protocol.
+detach_kitty() {
+	sleep 1
+	printf '\033[92;5u'
+}
+
+detach_modify_other_keys() {
+	sleep 1
+	printf '\033[27;5;92~'
 }
 
 expected_prolog() {
@@ -113,12 +125,13 @@ run_test_detached() {
 	fi
 }
 
-# $1 => session-name, $2 => command to execute
+# $1 => session-name, $2 => command to execute, $3 => detach command
 run_test_attached_detached() {
 	check_environment || return 1;
 
 	local name="$1"
 	local cmd="$2"
+	local send_detach="${3:-detach}"
 	local output="$name.out"
 	local output_expected="$name.expected"
 
@@ -127,7 +140,7 @@ run_test_attached_detached() {
 	$cmd >/dev/null 2>&1
 	expected_epilog "$name" $? > "$output_expected" 2>&1
 
-	if detach | $APPPATH $CLI_OPTS -c "$name" $cmd >/dev/null 2>&1 && sleep 3 &&
+	if "$send_detach" | $APPPATH $CLI_OPTS -c "$name" $cmd >/dev/null 2>&1 && sleep 3 &&
 	   $APPPATH -a "$name" 2>&1 | tail -1 | sed 's/.$//' > "$output" &&
 	   diff -u "$output_expected" "$output" && check_environment; then
 		rm "$output" "$output_expected"
@@ -176,6 +189,8 @@ EOT
 chmod +x long-running.sh
 
 run_test_attached_detached "attach-detach" "./long-running.sh"
+run_test_attached_detached "attach-detach-kitty" "./long-running.sh" detach_kitty
+run_test_attached_detached "attach-detach-modify-other-keys" "./long-running.sh" detach_modify_other_keys
 
 rm ./long-running.sh
 
